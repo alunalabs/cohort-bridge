@@ -1,0 +1,18 @@
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  user: dbuser
+  password: dbpass
+  dbname: ehr
+  table: patients
+  fields:
+    - first_name
+    - last_name
+    - dob
+    - zip
+peer:
+  host: 127.0.0.1
+  port: 9000
+listen_port: 9001
+private_key: 2d6f86790d04cb73a3025b4f55ff3f97aca4d61aa7a7b668bf68eb76c98276b1
