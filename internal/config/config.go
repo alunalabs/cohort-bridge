@@ -15,6 +15,7 @@ type Config struct {
 		Password string   `yaml:"password"`
 		DBName   string   `yaml:"dbname"`
 		Table    string   `yaml:"table"`
+		Filename string   `yaml:"filename"`
 		Fields   []string `yaml:"fields"`
 	} `yaml:"database"`
 	Peer struct {
