@@ -1,6 +1,6 @@
 database:
   type: csv
-  filename: data/patients2.csv
+  filename: data/patients.csv
   fields:
     - first_name
     - last_name
