@@ -1,6 +1,6 @@
 database:
   type: csv
-  filename: data/patients.csv
+  filename: data/patients_short.csv
   fields:
     - first_name
     - last_name
@@ -9,5 +9,5 @@ database:
 peer:
   host: 127.0.0.1
   port: 9000
-listen_port: 9001
+listen_port: 9002
 private_key: 2d6f86790d04cb73a3025b4f55ff3f97aca4d61aa7a7b668bf68eb76c98276b1

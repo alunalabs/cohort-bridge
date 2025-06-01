@@ -10,7 +10,7 @@ import (
 )
 
 // TokenizeRecords normalizes and tokenizes patient records using HMAC-SHA256.
-func TokenizeRecords(records []map[string]interface{}, fields []string, salt string) ([]string, error) {
+func TokenizeRecords(records []map[string]any, fields []string, salt string) ([]string, error) {
 	var pseudonyms []string
 	for _, record := range records {
 		var parts []string

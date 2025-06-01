@@ -1,8 +1,9 @@
+// internal/server/psi.go
 package server
 
 import (
 	"bufio"
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -13,157 +14,164 @@ import (
 	"github.com/auroradata-ai/cohort-bridge/internal/crypto"
 )
 
-// Receiver: blinds, sends, receives, decrypts, writes results.csv
-func RunPSIReceiver(cfg *config.Config, tokens []string) ([]string, error) {
-	fmt.Printf("[Receiver] Listening for PSI on port %d...\n", cfg.ListenPort)
+/* -------------------------------------------------------------------------- */
+/*                              Receiver (Party A)                            */
+/* -------------------------------------------------------------------------- */
+
+func RunPSIReceiver(cfg *config.Config, tokenToID map[string]string) ([]string, error) {
+	fmt.Printf("[Receiver] Listening on :%d …\n", cfg.ListenPort)
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ListenPort))
 	if err != nil {
 		return nil, fmt.Errorf("listen: %w", err)
 	}
 	defer ln.Close()
-	fmt.Printf("[Receiver] Waiting for sender to connect...\n")
+
 	conn, err := ln.Accept()
 	if err != nil {
 		return nil, fmt.Errorf("accept: %w", err)
 	}
 	defer conn.Close()
-	fmt.Printf("[Receiver] Sender connected.\n")
+	fmt.Println("[Receiver] Sender connected")
 
-	var blinds []*edwards25519.Scalar
-	var blindedPointsHex []string
-	fmt.Printf("[Receiver] Blinding %d tokens and sending to sender...\n", len(tokens))
-	for _, id := range tokens {
-		P := crypto.HashToCurve(id)
+	/* ---------- 1 ─ blind tokens and send them ----------------------------- */
+
+	var (
+		blinds       []*edwards25519.Scalar
+		blindedHex   []string
+		tokenOrdered []string
+	)
+	for tok := range tokenToID {
+		P := crypto.HashToCurve(tok)
 		Q, r := crypto.BlindPoint(P)
 		blinds = append(blinds, r)
-		blindedPointsHex = append(blindedPointsHex, hex.EncodeToString(Q.Bytes()))
+		blindedHex = append(blindedHex, hex.EncodeToString(Q.Bytes()))
+		tokenOrdered = append(tokenOrdered, tok)
 	}
-	fmt.Fprintf(conn, "%d\n", len(blindedPointsHex))
-	for _, qHex := range blindedPointsHex {
-		fmt.Fprintf(conn, "%s\n", qHex)
-	}
-	fmt.Printf("[Receiver] Sent all blinded tokens to sender.\n")
+	fmt.Printf("[Receiver] Blinded %d tokens\n", len(blindedHex))
 
-	respReader := bufio.NewReader(conn)
-	numRespLine, err := respReader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("read num responses: %w", err)
+	fmt.Fprintf(conn, "%d\n", len(blindedHex))
+	for _, h := range blindedHex {
+		fmt.Fprintf(conn, "%s\n", h)
 	}
+	fmt.Println("[Receiver] Sent blinded list")
+
+	/* ---------- 2 ─ read encrypted matches --------------------------------- */
+
+	rdr := bufio.NewReader(conn)
 	var numResp int
-	fmt.Sscanf(numRespLine, "%d", &numResp)
-	fmt.Printf("[Receiver] Expecting %d encrypted responses from sender.\n", numResp)
-	results := [][]string{}
-	var intersection []string
+	if _, err := fmt.Fscanf(rdr, "%d\n", &numResp); err != nil {
+		return nil, fmt.Errorf("read resp-count: %w", err)
+	}
+	fmt.Printf("[Receiver] Expecting %d encrypted rows\n", numResp)
+
+	type row struct{ id, meta string }
+	var (
+		results      []row
+		intersection []string
+	)
+
 	for i := 0; i < numResp; i++ {
-		encLine, err := respReader.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("read enc line: %w", err)
-		}
-		encLine = encLine[:len(encLine)-1]
+		line, _ := rdr.ReadString('\n')
 		var idx int
-		var nonceHex, ctHex string
-		fmt.Sscanf(encLine, "%d:%s:%s", &idx, &nonceHex, &ctHex)
+		var qPrimeHex, nonceHex, ctHex string
+		fmt.Sscanf(line, "%d:%s:%s:%s", &idx, &qPrimeHex, &nonceHex, &ctHex)
+
+		r := blinds[idx]
+		QpB, _ := hex.DecodeString(qPrimeHex)
+		Qp, _ := new(edwards25519.Point).SetBytes(QpB)
+
+		Pp := crypto.UnblindPoint(Qp, r) // r⁻¹·Q' = s·P
+		key := sha256.Sum256(Pp.Bytes())
+
 		nonce, _ := hex.DecodeString(nonceHex)
 		ct, _ := hex.DecodeString(ctHex)
-		P := crypto.HashToCurve(tokens[idx])
-		r := blinds[idx]
-		key := crypto.DeriveSharedKey(P, r)
-		plaintext, err := crypto.DecryptAESGCM(key, nonce, ct)
+		_, err := crypto.DecryptAESGCM(key[:], nonce, ct)
 		if err != nil {
-			fmt.Printf("[Receiver] Warning: failed to decrypt response for token %s: %v\n", tokens[idx], err)
+			fmt.Println("decrypt fail:", err)
 			continue
 		}
-		results = append(results, []string{tokens[idx], string(plaintext)})
-		intersection = append(intersection, tokens[idx])
-		fmt.Printf("[Receiver] Decrypted match for token %s\n", tokens[idx])
+
+		id := tokenToID[tokenOrdered[idx]]
+		fmt.Printf("[Recv] ok  %-2d key %x… %s\n", idx, key[:4], id)
 	}
+
 	out, err := os.Create("results.csv")
 	if err != nil {
-		return intersection, fmt.Errorf("create results.csv: %w", err)
+		return intersection, fmt.Errorf("csv: %w", err)
 	}
 	defer out.Close()
 	w := bufio.NewWriter(out)
 	w.WriteString("id,metadata\n")
-	for _, row := range results {
-		w.WriteString(fmt.Sprintf("%s,%s\n", row[0], row[1]))
+	for _, r := range results {
+		w.WriteString(fmt.Sprintf("%s,%s\n", r.id, r.meta))
 	}
 	w.Flush()
-	fmt.Printf("[Receiver] Wrote %d matches to results.csv\n", len(results))
+	fmt.Printf("[Receiver] MATCHES = %d\n", len(results))
 	return intersection, nil
 }
 
-// Sender: matches, encrypts, sends
-func RunPSISender(cfg *config.Config, tokens map[string]string) ([]string, error) {
-	fmt.Printf("[Sender] Connecting to receiver at %s:%d for PSI...\n", cfg.Peer.Host, cfg.Peer.Port)
+/* -------------------------------------------------------------------------- */
+/*                               Sender (Party B)                             */
+/* -------------------------------------------------------------------------- */
+
+func RunPSISender(cfg *config.Config, tokenToID map[string]string) ([]string, error) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port))
 	if err != nil {
-		return nil, fmt.Errorf("dial: %w", err)
+		return nil, err
 	}
 	defer conn.Close()
-	connReader := bufio.NewReader(conn)
+	rdr := bufio.NewReader(conn)
 
-	fmt.Println("[Sender] Waiting to receive number of blinded points...")
-	numLine, err := connReader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("read num: %w", err)
-	}
-	var num int
-	fmt.Sscanf(numLine, "%d", &num)
-	fmt.Printf("[Sender] Expecting %d blinded points from receiver.\n", num)
-	blindedPoints := make([]*edwards25519.Point, num)
-	for i := 0; i < num; i++ {
-		qHex, err := connReader.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("read blinded point: %w", err)
-		}
-		qHex = qHex[:len(qHex)-1]
-		qBytes, _ := hex.DecodeString(qHex)
-		Q, err := new(edwards25519.Point).SetBytes(qBytes)
-		if err != nil || Q == nil {
-			fmt.Printf("[Sender] Warning: failed to parse blinded point at index %d\n", i)
-			continue
-		}
-		blindedPoints[i] = Q
+	var n int
+	fmt.Fscanf(rdr, "%d\n", &n)
+
+	blinded := make([]*edwards25519.Point, n)
+	for i := range blinded {
+		h, _ := rdr.ReadString('\n')
+		h = h[:len(h)-1]
+		b, _ := hex.DecodeString(h)
+		blinded[i], _ = new(edwards25519.Point).SetBytes(b)
 	}
 
-	type encResp struct {
+	s := crypto.RandomScalar() // one secret
+	pointKey := crypto.PointKey
+
+	/* build map: Hash(s·P) -> id  (for quick “which id does this belong to?”) */
+	idx := make(map[string]string)
+	for tok, id := range tokenToID {
+		P := crypto.HashToCurve(tok)
+		sP := new(edwards25519.Point).ScalarMult(s, P)
+		idx[hex.EncodeToString(pointKey(sP))] = id
+	}
+
+	type row struct {
 		idx       int
+		qPrimeHex string
 		nonce, ct []byte
 	}
-	var responses []encResp
-	var intersection []string
-	for idx, Q := range blindedPoints {
-		if Q == nil {
-			continue
-		}
-		for hHex, meta := range tokens {
-			HyBytes, _ := hex.DecodeString(hHex)
-			Hy, err := new(edwards25519.Point).SetBytes(HyBytes)
-			if err != nil || Hy == nil {
-				fmt.Printf("[Sender] Warning: failed to parse token point for %s\n", hHex)
-				continue
-			}
-			if string(Q.Bytes()) == string(Hy.Bytes()) {
-				oneScalar := new(edwards25519.Scalar)
-				oneScalarBytes := [32]byte{1}
-				oneScalar.SetCanonicalBytes(oneScalarBytes[:])
-				key := crypto.DeriveSharedKey(Q, oneScalar)
-				nonce := make([]byte, 12)
-				rand.Read(nonce)
-				ct, nonce, err := crypto.EncryptAESGCM(key, []byte(meta))
-				if err != nil {
-					continue
-				}
-				responses = append(responses, encResp{idx, nonce, ct})
-				intersection = append(intersection, hHex)
-				break
-			}
+	var rows []row
+	for i, Q := range blinded {
+		Qp := crypto.ReblindPoint(Q, s)               // Q' = s·Q
+		k := pointKey(Qp)                             // same key both sides
+		if id, ok := idx[hex.EncodeToString(k)]; ok { // match found
+			nonce, ct, _ := crypto.EncryptAESGCM(k, []byte(id))
+			rows = append(rows, row{
+				idx:       i,
+				qPrimeHex: hex.EncodeToString(Qp.Bytes()),
+				nonce:     nonce, ct: ct,
+			})
+			fmt.Printf("[Sender] hit  %-2d key %x… %s\n", i, k[:4], id)
 		}
 	}
-	fmt.Fprintf(conn, "%d\n", len(responses))
-	for _, r := range responses {
-		fmt.Fprintf(conn, "%d:%s:%s\n", r.idx, hex.EncodeToString(r.nonce), hex.EncodeToString(r.ct))
+
+	/* --- send rows: idx|Q'|nonce|ct -------------------------------------- */
+	fmt.Fprintf(conn, "%d\n", len(rows))
+	for _, r := range rows {
+		fmt.Fprintf(conn, "%d:%s:%s:%s\n",
+			r.idx, r.qPrimeHex,
+			hex.EncodeToString(r.nonce),
+			hex.EncodeToString(r.ct))
 	}
-	fmt.Printf("Sent %d matches\n", len(responses))
-	return intersection, nil
+	fmt.Printf("[Sender] rows sent = %d\n", len(rows))
+	return nil, nil
 }
