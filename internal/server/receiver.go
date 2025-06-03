@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"time"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
@@ -62,23 +64,25 @@ func RunAsReceiver(cfg *config.Config) {
 	defer listener.Close()
 
 	fmt.Printf("📡 Listening for connections on port %d\n", cfg.ListenPort)
+	fmt.Println("💡 Receiver will automatically shutdown after processing one matching session")
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept connection: %v", err)
-			continue
-		}
-
-		go handleConnection(conn, records)
+	// Accept only one connection and process it
+	conn, err := listener.Accept()
+	if err != nil {
+		log.Fatalf("Failed to accept connection: %v", err)
 	}
+
+	fmt.Printf("📞 Connection accepted from %s\n", conn.RemoteAddr())
+	handleConnection(conn, records, csvDB)
+
+	fmt.Println("🔄 Matching session complete. Receiver shutting down automatically.")
 }
 
 // handleConnection handles a single client connection
-func handleConnection(conn net.Conn, records []PatientRecord) {
+func handleConnection(conn net.Conn, records []PatientRecord, csvDB *db.CSVDatabase) {
 	defer conn.Close()
 
-	fmt.Printf("📞 New connection from %s\n", conn.RemoteAddr())
+	fmt.Printf("📞 Connection accepted from %s\n", conn.RemoteAddr())
 
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
@@ -265,6 +269,20 @@ func handleConnection(conn net.Conn, records []PatientRecord) {
 					match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.JaccardSimilarity)
 			}
 
+			// Create output directory if it doesn't exist
+			err := os.MkdirAll("out", 0755)
+			if err != nil {
+				log.Printf("Failed to create out directory: %v", err)
+			}
+
+			// Save results to CSV files in out/ directory
+			timestamp := time.Now().Format("20060102_150405")
+			matchesFile := fmt.Sprintf("out/matches_%s.csv", timestamp)
+			detailsFile := fmt.Sprintf("out/match_details_%s.csv", timestamp)
+
+			saveResultsToCSV(actualMatches, matchesFile)
+			saveMatchDetailsToCSV(actualMatches, detailsFile, csvDB)
+
 			results := &match.TwoPartyMatchResult{
 				MatchingBuckets: len(records), // All records compared
 				CandidatePairs:  len(matchResults),
@@ -295,4 +313,73 @@ func handleConnection(conn net.Conn, records []PatientRecord) {
 			log.Printf("Unknown message type: %s", msg.Type)
 		}
 	}
+}
+
+// saveResultsToCSV saves match results to a CSV file for easy viewing
+func saveResultsToCSV(matches []*match.MatchResult, filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Printf("Failed to create results file %s: %v", filename, err)
+		return
+	}
+	defer file.Close()
+
+	// Write CSV header
+	file.WriteString("Receiver_ID,Sender_ID,Match_Score,Hamming_Distance,Jaccard_Similarity,Is_Match\n")
+
+	// Write match data
+	for _, match := range matches {
+		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d,%.3f,%t\n",
+			match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.JaccardSimilarity, match.IsMatch))
+	}
+
+	fmt.Printf("💾 Match results saved to: %s\n", filename)
+}
+
+// saveMatchDetailsToCSV saves match details with patient demographics for debugging
+func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB *db.CSVDatabase) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Printf("Failed to create match details file %s: %v", filename, err)
+		return
+	}
+	defer file.Close()
+
+	// Write CSV header
+	file.WriteString("Receiver_ID,Receiver_First,Receiver_Last,Receiver_DOB,Receiver_ZIP,Sender_ID,Match_Score,Hamming_Distance,Is_Match\n")
+
+	// Get all receiver records from CSV
+	allReceiverRecords, err := csvDB.List(0, 1000000)
+	if err != nil {
+		log.Printf("Failed to get receiver records: %v", err)
+		return
+	}
+
+	// Create a map for quick lookup
+	receiverMap := make(map[string]map[string]string)
+	for _, record := range allReceiverRecords {
+		receiverMap[record["id"]] = record
+	}
+
+	// Write match details with patient demographics
+	for _, match := range matches {
+		receiverRecord, receiverExists := receiverMap[match.ID1]
+		if receiverExists {
+			file.WriteString(fmt.Sprintf("%s,%s,%s,%s,%s,%s,%.3f,%d,%t\n",
+				match.ID1,
+				receiverRecord["first_name"],
+				receiverRecord["last_name"],
+				receiverRecord["dob"],
+				receiverRecord["zip"],
+				match.ID2,
+				match.MatchScore,
+				match.HammingDistance,
+				match.IsMatch))
+		} else {
+			file.WriteString(fmt.Sprintf("%s,,,,,,%s,%.3f,%d,%t\n",
+				match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch))
+		}
+	}
+
+	fmt.Printf("💾 Match details saved to: %s\n", filename)
 }

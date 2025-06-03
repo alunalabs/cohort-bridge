@@ -16,6 +16,7 @@ type Record struct {
 	ID        string   `json:"id"`
 	BloomData string   `json:"bloom"`   // base64-encoded BloomFilter bytes
 	MinHash   []uint32 `json:"minhash"` // signature
+	QGramData string   `json:"qgram"`   // base64-encoded QGramSet data
 }
 
 // Storage writes and reads Record entries to/from a JSON‐line file.
@@ -129,4 +130,48 @@ func BloomFromBase64(encoded string) (*BloomFilter, error) {
 		return nil, err
 	}
 	return bf, nil
+}
+
+// Helper: Serialize a QGramSet into base64 (for Record.QGramData).
+func QGramToBase64(qs *QGramSet) (string, error) {
+	// Convert QGramSet to a simple map for serialization
+	data := struct {
+		Q       int            `json:"q"`
+		Grams   map[string]int `json:"grams"`
+		Padding string         `json:"padding"`
+	}{
+		Q:       qs.Q,
+		Grams:   qs.Grams,
+		Padding: qs.Padding,
+	}
+
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(bytes), nil
+}
+
+// Helper: Deserialize a QGramSet from base64 string.
+func QGramFromBase64(encoded string) (*QGramSet, error) {
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, err
+	}
+
+	var data struct {
+		Q       int            `json:"q"`
+		Grams   map[string]int `json:"grams"`
+		Padding string         `json:"padding"`
+	}
+
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, err
+	}
+
+	return &QGramSet{
+		Q:       data.Q,
+		Grams:   data.Grams,
+		Padding: data.Padding,
+	}, nil
 }

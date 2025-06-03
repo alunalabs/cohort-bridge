@@ -15,7 +15,9 @@ import (
 type FuzzyMatchConfig struct {
 	HammingThreshold  uint32  // Maximum Hamming distance for a match
 	JaccardThreshold  float64 // Minimum Jaccard similarity for a match
+	QGramThreshold    float64 // Minimum Q-gram similarity for a match
 	UseSecureProtocol bool    // Whether to use secure multi-party computation
+	QGramLength       int     // Length of q-grams to use
 }
 
 // FuzzyMatcher handles secure fuzzy matching between Bloom filters
@@ -37,6 +39,7 @@ type MatchResult struct {
 	IsMatch           bool    `json:"is_match"`
 	HammingDistance   uint32  `json:"hamming_distance"`
 	JaccardSimilarity float64 `json:"jaccard_similarity"`
+	QGramSimilarity   float64 `json:"qgram_similarity"`
 	MatchScore        float64 `json:"match_score"`
 	BucketID          string  `json:"bucket_id,omitempty"`
 }
@@ -66,12 +69,29 @@ func (fm *FuzzyMatcher) CompareRecords(record1, record2 *pprl.Record) (*MatchRes
 		return nil, fmt.Errorf("failed to calculate jaccard similarity: %w", err)
 	}
 
+	// Calculate Q-gram similarity
+	qgramSim := 0.0
+	if record1.QGramData != "" && record2.QGramData != "" {
+		qs1, err := pprl.QGramFromBase64(record1.QGramData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize q-gram set 1: %w", err)
+		}
+
+		qs2, err := pprl.QGramFromBase64(record2.QGramData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize q-gram set 2: %w", err)
+		}
+
+		qgramSim = qs1.GetQGramSimilarity(qs2)
+	}
+
 	// Determine if records match based on thresholds
 	isMatch := hammingDist <= fm.config.HammingThreshold &&
-		jaccardSim >= fm.config.JaccardThreshold
+		jaccardSim >= fm.config.JaccardThreshold &&
+		qgramSim >= fm.config.QGramThreshold
 
 	// Calculate a composite match score
-	matchScore := fm.calculateMatchScore(hammingDist, jaccardSim, bf1)
+	matchScore := fm.calculateMatchScore(hammingDist, jaccardSim, qgramSim, bf1)
 
 	return &MatchResult{
 		ID1:               record1.ID,
@@ -79,21 +99,22 @@ func (fm *FuzzyMatcher) CompareRecords(record1, record2 *pprl.Record) (*MatchRes
 		IsMatch:           isMatch,
 		HammingDistance:   hammingDist,
 		JaccardSimilarity: jaccardSim,
+		QGramSimilarity:   qgramSim,
 		MatchScore:        matchScore,
 	}, nil
 }
 
 // calculateMatchScore computes a composite match score from various similarity metrics
-func (fm *FuzzyMatcher) calculateMatchScore(hammingDist uint32, jaccardSim float64, bf *pprl.BloomFilter) float64 {
+func (fm *FuzzyMatcher) calculateMatchScore(hammingDist uint32, jaccardSim, qgramSim float64, bf *pprl.BloomFilter) float64 {
 	// Get bloom filter size for normalization
-	bfSize := bf.GetSize() // We'll need to add this method to BloomFilter
+	bfSize := bf.GetSize()
 
 	// Normalize Hamming distance (lower is better)
 	normalizedHamming := 1.0 - (float64(hammingDist) / float64(bfSize))
 
 	// Combine metrics with weights
-	// Weight Jaccard similarity more heavily as it's more reliable for MinHash
-	score := 0.3*normalizedHamming + 0.7*jaccardSim
+	// Weight Jaccard similarity and Q-gram similarity more heavily as they're more reliable
+	score := 0.2*normalizedHamming + 0.4*jaccardSim + 0.4*qgramSim
 
 	return math.Max(0.0, math.Min(1.0, score))
 }

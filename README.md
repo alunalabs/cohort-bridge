@@ -1,5 +1,14 @@
 # HIPAA-Compliant Decentralized Fuzzy Matching System
 
+> **⚠️ Work in Progress Notice**  
+> This system is currently under active development. While the core functionality for privacy-preserving record linkage is implemented, some features are still in progress or experimental:
+> - The q-gram based matching is newly implemented and may need tuning
+> - Secure multi-party computation protocols (garbled circuits, VOLE) are currently placeholders
+> - Performance optimizations for large-scale matching are pending
+> - Integration with external systems and APIs is not yet complete
+> 
+> Please use with caution in production environments and verify results carefully.
+
 A secure, privacy-preserving record linkage system using Bloom filters, MinHash signatures, and commutative encryption for HIPAA-compliant patient matching across multiple healthcare institutions.
 
 ## 🏗️ Architecture
