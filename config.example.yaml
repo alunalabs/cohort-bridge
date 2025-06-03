@@ -1,0 +1,33 @@
+# Example configuration file for HIPAA-compliant fuzzy matching system
+# Copy this file to config.yaml and modify the values as needed
+
+database:
+  type: csv
+  filename: data/patients.csv  # Path to your patient data CSV file
+  fields:
+    - first_name    # Patient first name column
+    - last_name     # Patient last name column  
+    - dob          # Date of birth column (YYYY-MM-DD format)
+    - zip          # ZIP code column
+
+# Network configuration for peer-to-peer matching
+peer:
+  host: 127.0.0.1   # IP address of the peer to connect to
+  port: 8081        # Port number of the peer
+
+listen_port: 8082   # Port to listen on for incoming connections
+
+# Cryptographic key for secure communications
+# Generate a new key for production use: openssl rand -hex 32
+private_key: YOUR_PRIVATE_KEY_HERE_32_HEX_CHARACTERS
+
+# Optional: Fuzzy matching parameters
+matching:
+  bloom_size: 1024           # Size of Bloom filter in bits
+  bloom_hashes: 5            # Number of hash functions
+  minhash_size: 128          # MinHash signature length
+  qgram_length: 2            # Q-gram length for string similarity
+  hamming_threshold: 100     # Maximum Hamming distance for matches
+  jaccard_threshold: 0.7     # Minimum Jaccard similarity for matches
+  qgram_threshold: 0.8       # Minimum Q-gram similarity for matches
+  noise_level: 0.01          # Privacy noise level (0.0-1.0) 

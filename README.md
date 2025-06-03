@@ -58,6 +58,30 @@ cd cohort-bridge
 go mod download
 ```
 
+### Initial Setup
+
+1. **Copy example configuration**:
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
+
+2. **Set up your data directory**:
+   - Place your CSV patient data files in the `data/` directory
+   - See `data/README.md` for format requirements and examples
+   - Update `config.yaml` to point to your data files
+
+3. **Generate a private key** (for production):
+   ```bash
+   openssl rand -hex 32
+   ```
+   Replace `YOUR_PRIVATE_KEY_HERE_32_HEX_CHARACTERS` in `config.yaml` with the generated key.
+
+### Configuration Examples
+
+- `config.example.yaml` - Basic single-party configuration
+- `config_example_party_a.yaml` - Party A in two-party matching
+- `config_example_party_b.yaml` - Party B in two-party matching
+
 ### Running the Demo
 
 ```bash
@@ -76,6 +100,7 @@ go run cmd/demo/main.go \
   -minhash-sigs=128 \
   -hamming-threshold=150 \
   -jaccard-threshold=0.6 \
+  -qgram-threshold=0.8 \
   -output=./results \
   -verbose
 ```
@@ -91,6 +116,7 @@ go run cmd/demo/main.go \
 - `minhash-sigs` - Number of MinHash signatures
 - `hamming-threshold` - Maximum Hamming distance for matching
 - `jaccard-threshold` - Minimum Jaccard similarity for matching
+- `qgram-threshold` - Minimum q-gram similarity for matching
 - `output` - Output directory for results
 - `verbose` - Enable detailed logging
 

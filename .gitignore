@@ -1,2 +1,47 @@
-notes/
+# Build artifacts and executables
+*.exe
+*.dll
+*.so
+*.dylib
 out/
+
+# Test outputs and temporary files
+test_output/
+receiver_output.txt
+*.log
+
+# Data directories (actual data should not be committed)
+data/
+
+# Configuration files (keep examples only)
+config.yaml
+config_*.yaml
+!config.example.yaml
+!config_example_*.yaml
+
+# Go build cache and modules
+*.test
+*.out
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Runtime files
+*.pid
+*.sock
+
+# Notes and documentation drafts
+notes/
+drafts/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/

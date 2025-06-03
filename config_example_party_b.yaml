@@ -1,0 +1,32 @@
+# Example configuration for Party B in two-party matching
+# This demonstrates the complementary configuration for the second party
+
+database:
+  type: csv
+  filename: data/clinic_b_patients.csv
+  fields:
+    - FirstName   # First name field (different column naming)
+    - LastName    # Last name field
+    - DOB         # Date of birth field
+    - ZipCode     # ZIP code field
+
+# Party B acts as the sender in this example  
+peer:
+  host: 127.0.0.1   # IP of Party A
+  port: 8081        # Port where Party A is listening
+
+listen_port: 8082   # Port for Party B to listen on
+
+# Unique private key for Party B (different from Party A)
+private_key: fedcba0987654321098765432109876543210fedcba0987654321098765432109
+
+# Matching configuration (should match Party A's settings)
+matching:
+  bloom_size: 2048           # Must match Party A
+  bloom_hashes: 8            # Must match Party A
+  minhash_size: 256          # Must match Party A
+  qgram_length: 3            # Must match Party A
+  hamming_threshold: 200     # Must match Party A
+  jaccard_threshold: 0.75    # Must match Party A
+  qgram_threshold: 0.85      # Must match Party A
+  noise_level: 0.02          # Can vary for differential privacy 
