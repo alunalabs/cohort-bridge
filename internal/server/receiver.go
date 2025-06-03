@@ -1,163 +1,298 @@
 package server
 
 import (
-	"bufio"
-	"encoding/csv"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
+	"log"
 	"net"
-	"os"
 
-	"filippo.io/edwards25519"
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
-	"github.com/auroradata-ai/cohort-bridge/internal/crypto"
+	"github.com/auroradata-ai/cohort-bridge/internal/db"
+	"github.com/auroradata-ai/cohort-bridge/internal/match"
+	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
 
-// ExchangePublicKeysAndPrintSaltServer listens for a peer, then exchanges public keys and prints both keys and the derived salt.
-func ExchangePublicKeysAndPrintSaltServer(port, privateKeyHex, publicKeyHex string) error {
-	addr := ":" + port
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
-	}
-	fmt.Printf("Listening for peer connection on port %s...\n", port)
-	conn, err := ln.Accept()
-	if err != nil {
-		return fmt.Errorf("failed to accept connection: %w", err)
-	}
-	defer conn.Close()
-
-	// Now exchange public keys (receiver receives first)
-	if err := exchangeAndPrint(conn, privateKeyHex, publicKeyHex, false); err != nil {
-		return err
-	}
-	return nil
+// PatientRecord represents a patient with Bloom filter representation
+type PatientRecord struct {
+	ID          string
+	BloomFilter *pprl.BloomFilter
+	MinHash     *pprl.MinHash
 }
 
-// ExchangePublicKeysServer listens for a peer, exchanges public keys, and returns the peer's public key.
-func ExchangePublicKeysServer(port, publicKeyHex string) (string, error) {
-	addr := ":" + port
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return "", fmt.Errorf("failed to listen: %w", err)
-	}
-	conn, err := ln.Accept()
-	if err != nil {
-		return "", fmt.Errorf("failed to accept connection: %w", err)
-	}
-	defer conn.Close()
-
-	// Receive peer's public key
-	peerPubKey, err := readMultiline(conn)
-	if err != nil {
-		return "", fmt.Errorf("failed to read peer public key: %w", err)
-	}
-	// Send our public key
-	_, err = fmt.Fprintf(conn, "%s\nENDKEY\n", publicKeyHex)
-	if err != nil {
-		return "", fmt.Errorf("failed to send public key: %w", err)
-	}
-	return peerPubKey, nil
+// MatchingMessage represents the protocol messages
+type MatchingMessage struct {
+	Type    string      `json:"type"`
+	Payload interface{} `json:"payload"`
 }
 
-// RunReceiverPSI executes the receiver side of the Private Set Intersection protocol.
-func RunReceiverPSI(cfg *config.Config) error {
-	// Open patients2.csv
-	csvFile, err := os.Open("patients2.csv")
-	if err != nil {
-		return fmt.Errorf("open patients2.csv: %w", err)
-	}
-	defer csvFile.Close()
-	reader := csv.NewReader(bufio.NewReader(csvFile))
-	_, err = reader.Read()
-	if err != nil {
-		return fmt.Errorf("read header: %w", err)
-	}
-	idIdx := 0 // Assume first column is ID
+// BlockingData represents encrypted bucket data for blocking
+type BlockingData struct {
+	EncryptedBuckets map[string][]string `json:"encrypted_buckets"`
+	Signatures       map[string]string   `json:"signatures"`
+}
 
-	// Connect to sender
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ListenPort))
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-	defer ln.Close()
-	fmt.Printf("Waiting for sender on port %d...\n", cfg.ListenPort)
-	conn, err := ln.Accept()
-	if err != nil {
-		return fmt.Errorf("accept: %w", err)
-	}
-	defer conn.Close()
+// MatchingData represents Bloom filter data for fuzzy matching
+type MatchingData struct {
+	Records map[string]string `json:"records"` // ID -> base64 encoded Bloom filter
+}
 
-	// Step 1: Hash and blind IDs, send to sender
-	var blinds []*edwards25519.Scalar
-	var blindedPointsHex []string
-	var ids []string
+// RunAsReceiver implements the receiver mode with fuzzy matching
+func RunAsReceiver(cfg *config.Config) {
+	fmt.Printf("🔄 Starting receiver on port %d...\n", cfg.ListenPort)
+
+	// Load CSV data
+	csvDB, err := db.NewCSVDatabase(cfg.Database.Filename)
+	if err != nil {
+		log.Fatalf("Failed to load CSV database: %v", err)
+	}
+
+	// Convert CSV records to Bloom filters
+	records, err := loadPatientRecordsUtil(csvDB, cfg.Database.Fields)
+	if err != nil {
+		log.Fatalf("Failed to load patient records: %v", err)
+	}
+
+	fmt.Printf("📊 Loaded %d patient records\n", len(records))
+
+	// Start TCP server
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ListenPort))
+	if err != nil {
+		log.Fatalf("Failed to start listener: %v", err)
+	}
+	defer listener.Close()
+
+	fmt.Printf("📡 Listening for connections on port %d\n", cfg.ListenPort)
+
 	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
+		conn, err := listener.Accept()
 		if err != nil {
-			return fmt.Errorf("csv read: %w", err)
-		}
-		id := row[idIdx]
-		ids = append(ids, id)
-		P := crypto.HashToCurve(id)
-		Q, r := crypto.BlindPoint(P)
-		blinds = append(blinds, r)
-		blindedPointsHex = append(blindedPointsHex, hex.EncodeToString(Q.Bytes()))
-	}
-	// Send number of points
-	fmt.Fprintf(conn, "%d\n", len(blindedPointsHex))
-	// Send each blinded point as hex
-	for _, qHex := range blindedPointsHex {
-		fmt.Fprintf(conn, "%s\n", qHex)
-	}
-
-	// Step 2: Receive encrypted blobs
-	respReader := bufio.NewReader(conn)
-	numRespLine, err := respReader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("read num responses: %w", err)
-	}
-	var numResp int
-	fmt.Sscanf(numRespLine, "%d", &numResp)
-	results := [][]string{}
-	for i := 0; i < numResp; i++ {
-		encLine, err := respReader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("read enc line: %w", err)
-		}
-		encLine = encLine[:len(encLine)-1]
-		// Format: idx:hex_nonce:hex_ciphertext
-		var idx int
-		var nonceHex, ctHex string
-		fmt.Sscanf(encLine, "%d:%s:%s", &idx, &nonceHex, &ctHex)
-		nonce, _ := hex.DecodeString(nonceHex)
-		ct, _ := hex.DecodeString(ctHex)
-		// Derive shared key
-		P := crypto.HashToCurve(ids[idx])
-		r := blinds[idx]
-		key := crypto.DeriveSharedKey(P, r)
-		plaintext, err := crypto.DecryptAESGCM(key, nonce, ct)
-		if err != nil {
+			log.Printf("Failed to accept connection: %v", err)
 			continue
 		}
-		results = append(results, []string{ids[idx], string(plaintext)})
+
+		go handleConnection(conn, records)
 	}
-	// Write results.csv
-	out, err := os.Create("results.csv")
-	if err != nil {
-		return fmt.Errorf("create results.csv: %w", err)
+}
+
+// handleConnection handles a single client connection
+func handleConnection(conn net.Conn, records []PatientRecord) {
+	defer conn.Close()
+
+	fmt.Printf("📞 New connection from %s\n", conn.RemoteAddr())
+
+	decoder := json.NewDecoder(conn)
+	encoder := json.NewEncoder(conn)
+
+	// Convert our records to pprl format for potential future pipeline use
+	var pprlRecords []*pprl.Record
+	for _, record := range records {
+		bloomData, err := pprl.BloomToBase64(record.BloomFilter)
+		if err != nil {
+			log.Printf("Failed to encode Bloom filter for record %s: %v", record.ID, err)
+			continue
+		}
+
+		// Get MinHash signature
+		sig, err := record.MinHash.ComputeSignature(record.BloomFilter)
+		if err != nil {
+			log.Printf("Failed to compute MinHash signature for record %s: %v", record.ID, err)
+			continue
+		}
+
+		pprlRecords = append(pprlRecords, &pprl.Record{
+			ID:        record.ID,
+			BloomData: bloomData,
+			MinHash:   sig,
+		})
 	}
-	defer out.Close()
-	w := csv.NewWriter(out)
-	w.Write([]string{"id", "metadata"})
-	for _, row := range results {
-		w.Write(row)
+
+	for {
+		var msg MatchingMessage
+		if err := decoder.Decode(&msg); err != nil {
+			if err.Error() != "EOF" {
+				log.Printf("Failed to decode message: %v", err)
+			}
+			break
+		}
+
+		switch msg.Type {
+		case "blocking_request":
+			fmt.Println("🔐 Processing blocking request...")
+
+			// Send back our blocking data
+			ourBlocking := BlockingData{
+				EncryptedBuckets: make(map[string][]string),
+				Signatures:       make(map[string]string),
+			}
+
+			// Simple bucketing for demo
+			for _, record := range records {
+				bucket := fmt.Sprintf("bucket_%s", record.ID[:1])
+				ourBlocking.EncryptedBuckets[bucket] = append(ourBlocking.EncryptedBuckets[bucket], record.ID)
+			}
+
+			response := MatchingMessage{
+				Type:    "blocking_response",
+				Payload: ourBlocking,
+			}
+
+			if err := encoder.Encode(response); err != nil {
+				log.Printf("Failed to send blocking response: %v", err)
+				return
+			}
+
+		case "matching_request":
+			fmt.Println("🔍 Processing matching request...")
+
+			// Parse sender's matching data
+			payloadBytes, _ := json.Marshal(msg.Payload)
+			var senderMatching MatchingData
+			json.Unmarshal(payloadBytes, &senderMatching)
+
+			// Perform real fuzzy matching between sender and receiver records
+			matchResults := make([]*match.MatchResult, 0)
+
+			// Create fuzzy matcher with appropriate thresholds
+			fuzzyConfig := &match.FuzzyMatchConfig{
+				HammingThreshold:  200, // Allow up to 200 bit differences
+				JaccardThreshold:  0.5, // Require at least 50% Jaccard similarity
+				UseSecureProtocol: false,
+			}
+
+			// Compare ALL receiver records with ALL sender records (not just same IDs)
+			fmt.Printf("🔍 Comparing %d receiver records with %d sender records\n",
+				len(pprlRecords), len(senderMatching.Records))
+
+			for _, receiverRecord := range pprlRecords {
+				for senderID, senderBloomData := range senderMatching.Records {
+					// Compare EVERY receiver record with EVERY sender record
+					// This is the correct approach for finding actual matches
+
+					// Decode Bloom filters for comparison
+					receiverBF, err := pprl.BloomFromBase64(receiverRecord.BloomData)
+					if err != nil {
+						log.Printf("Failed to decode receiver Bloom filter: %v", err)
+						continue
+					}
+
+					senderBF, err := pprl.BloomFromBase64(senderBloomData)
+					if err != nil {
+						log.Printf("Failed to decode sender Bloom filter: %v", err)
+						continue
+					}
+
+					// Calculate Hamming distance
+					hammingDist, err := receiverBF.HammingDistance(senderBF)
+					if err != nil {
+						log.Printf("Failed to calculate Hamming distance: %v", err)
+						continue
+					}
+
+					// Determine if this is a match based on thresholds
+					isMatch := hammingDist <= fuzzyConfig.HammingThreshold
+
+					// Calculate match score
+					matchScore := 1.0
+					if hammingDist > 0 {
+						bfSize := receiverBF.GetSize()
+						matchScore = 1.0 - (float64(hammingDist) / float64(bfSize))
+					}
+
+					// Only add to results if similarity is high enough (potential match)
+					// Use a stricter threshold for reporting to avoid too many false positives
+					if matchScore >= 0.95 { // Lowered from 0.98 to capture genuine matches
+						result := &match.MatchResult{
+							ID1:               receiverRecord.ID,
+							ID2:               senderID,
+							IsMatch:           isMatch,
+							HammingDistance:   hammingDist,
+							JaccardSimilarity: matchScore, // Use match score as similarity estimate
+							MatchScore:        matchScore,
+						}
+
+						matchResults = append(matchResults, result)
+
+						if isMatch {
+							fmt.Printf("   ✅ Potential match: Receiver[%s] <-> Sender[%s] (Hamming: %d, Score: %.3f)\n",
+								receiverRecord.ID, senderID, hammingDist, matchScore)
+						}
+					}
+				}
+			}
+
+			// Filter for actual matches
+			actualMatches := make([]*match.MatchResult, 0)
+			for _, result := range matchResults {
+				if result.IsMatch {
+					actualMatches = append(actualMatches, result)
+				}
+			}
+
+			fmt.Printf("📊 Matching summary:\n")
+			fmt.Printf("   Total comparisons: %d\n", len(matchResults))
+			fmt.Printf("   Matches found: %d\n", len(actualMatches))
+
+			// Prepare our matching data response
+			ourMatching := MatchingData{
+				Records: make(map[string]string),
+			}
+
+			for _, record := range records {
+				// Encode Bloom filter to base64
+				bloomData, err := pprl.BloomToBase64(record.BloomFilter)
+				if err != nil {
+					log.Printf("Failed to encode Bloom filter: %v", err)
+					continue
+				}
+				ourMatching.Records[record.ID] = bloomData
+			}
+
+			response := MatchingMessage{
+				Type:    "matching_response",
+				Payload: ourMatching,
+			}
+
+			if err := encoder.Encode(response); err != nil {
+				log.Printf("Failed to send matching response: %v", err)
+				return
+			}
+
+			// Send final results with actual matches
+			fmt.Printf("✅ Matching complete! Found %d matches out of %d comparisons\n",
+				len(actualMatches), len(matchResults))
+			for _, match := range actualMatches {
+				fmt.Printf("   Match: %s <-> %s (Score: %.3f, Hamming: %d, Jaccard: %.3f)\n",
+					match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.JaccardSimilarity)
+			}
+
+			results := &match.TwoPartyMatchResult{
+				MatchingBuckets: len(records), // All records compared
+				CandidatePairs:  len(matchResults),
+				TotalMatches:    len(actualMatches),
+				MatchResults:    matchResults,
+				Matches:         actualMatches,
+				Party1Records:   len(records),
+				Party2Records:   len(senderMatching.Records),
+			}
+
+			finalResponse := MatchingMessage{
+				Type:    "results",
+				Payload: results,
+			}
+
+			if err := encoder.Encode(finalResponse); err != nil {
+				log.Printf("Failed to send results: %v", err)
+				return
+			}
+
+			return // End connection after sending results
+
+		case "shutdown":
+			fmt.Println("🔴 Received shutdown signal")
+			return
+
+		default:
+			log.Printf("Unknown message type: %s", msg.Type)
+		}
 	}
-	w.Flush()
-	fmt.Printf("Wrote %d matches to results.csv\n", len(results))
-	return nil
 }

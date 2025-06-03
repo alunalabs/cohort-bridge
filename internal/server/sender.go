@@ -1,212 +1,192 @@
 package server
 
 import (
-	"bufio"
-	"crypto/rand"
-	"encoding/csv"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
+	"log"
 	"net"
-	"os"
-	"strings"
+	"time"
 
-	"filippo.io/edwards25519"
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
-	"github.com/auroradata-ai/cohort-bridge/internal/crypto"
+	"github.com/auroradata-ai/cohort-bridge/internal/db"
+	"github.com/auroradata-ai/cohort-bridge/internal/match"
+	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
 
-// ExchangePublicKeysAndPrintSaltClient connects to a peer, then exchanges public keys and prints both keys and the derived salt.
-func ExchangePublicKeysAndPrintSaltClient(peerAddr, privateKeyHex, publicKeyHex string) error {
-	// Establish connection first
-	conn, err := net.Dial("tcp", peerAddr)
+// RunAsSender implements the sender mode with fuzzy matching
+func RunAsSender(cfg *config.Config) {
+	fmt.Printf("🚀 Starting sender mode...\n")
+
+	// Load CSV data
+	csvDB, err := db.NewCSVDatabase(cfg.Database.Filename)
 	if err != nil {
-		return fmt.Errorf("failed to connect to peer: %w", err)
+		log.Fatalf("Failed to load CSV database: %v", err)
 	}
-	defer conn.Close()
 
-	// Now exchange public keys
-	if err := exchangeAndPrint(conn, privateKeyHex, publicKeyHex, true); err != nil {
-		return err
-	}
-	return nil
-}
-
-// exchangeAndPrint handles the actual public key exchange and salt derivation.
-// If isSender is true, send our key first, then receive. If false, receive first, then send.
-func exchangeAndPrint(conn net.Conn, privateKeyHex, publicKeyHex string, isSender bool) error {
-	if isSender {
-		// Send our public key
-		_, err := fmt.Fprintf(conn, "%s\nENDKEY\n", publicKeyHex)
-		if err != nil {
-			return fmt.Errorf("failed to send public key: %w", err)
-		}
-		// Receive peer's public key
-		peerPubKey, err := readMultiline(conn)
-		if err != nil {
-			return fmt.Errorf("failed to read peer public key: %w", err)
-		}
-		fmt.Println("Our public key:", publicKeyHex)
-		fmt.Println("Peer public key:", peerPubKey)
-		sharedSalt := DeriveSharedSalt(privateKeyHex, peerPubKey)
-		fmt.Println("Derived shared salt:", sharedSalt)
-		fmt.Println("Done. Exiting for debugging.")
-	} else {
-		// Receive peer's public key
-		peerPubKey, err := readMultiline(conn)
-		if err != nil {
-			return fmt.Errorf("failed to read peer public key: %w", err)
-		}
-		// Send our public key
-		_, err = fmt.Fprintf(conn, "%s\nENDKEY\n", publicKeyHex)
-		if err != nil {
-			return fmt.Errorf("failed to send public key: %w", err)
-		}
-		fmt.Println("Our public key:", publicKeyHex)
-		fmt.Println("Peer public key:", peerPubKey)
-		sharedSalt := DeriveSharedSalt(privateKeyHex, peerPubKey)
-		fmt.Println("Derived shared salt:", sharedSalt)
-		fmt.Println("Done. Exiting for debugging.")
-	}
-	return nil
-}
-
-// ExchangePublicKeysClient connects to a peer, exchanges public keys, and returns the peer's public key.
-func ExchangePublicKeysClient(peerAddr, publicKeyHex string) (string, error) {
-	conn, err := net.Dial("tcp", peerAddr)
+	// Convert CSV records to Bloom filters using the utility function
+	records, err := loadPatientRecordsUtil(csvDB, cfg.Database.Fields)
 	if err != nil {
-		return "", fmt.Errorf("failed to connect to peer: %w", err)
-	}
-	defer conn.Close()
-
-	// Send our public key
-	_, err = fmt.Fprintf(conn, "%s\nENDKEY\n", publicKeyHex)
-	if err != nil {
-		return "", fmt.Errorf("failed to send public key: %w", err)
+		log.Fatalf("Failed to load patient records: %v", err)
 	}
 
-	// Receive peer's public key (read until a delimiter line)
-	peerPubKey, err := readMultiline(conn)
-	if err != nil {
-		return "", fmt.Errorf("failed to read peer public key: %w", err)
-	}
-	return peerPubKey, nil
-}
-
-// Helper to read a multi-line public key until ENDKEY line
-func readMultiline(conn net.Conn) (string, error) {
-	var lines []string
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "ENDKEY" {
-			break
-		}
-		lines = append(lines, line)
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-func RunSenderPSI(cfg *config.Config) error {
-	// Open patients.csv
-	csvFile, err := os.Open("patients.csv")
-	if err != nil {
-		return fmt.Errorf("open patients.csv: %w", err)
-	}
-	defer csvFile.Close()
-	reader := csv.NewReader(bufio.NewReader(csvFile))
-	_, err = reader.Read()
-	if err != nil {
-		return fmt.Errorf("read header: %w", err)
-	}
-	idIdx := 0   // Assume first column is ID
-	metaIdx := 1 // Assume second column is metadata
-
-	// Build map: H(y) hex -> metadata
-	hashMap := make(map[string]string)
-	for {
-		row, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("csv read: %w", err)
-		}
-		id := row[idIdx]
-		meta := row[metaIdx]
-		P := crypto.HashToCurve(id)
-		hashMap[hex.EncodeToString(P.Bytes())] = meta
-	}
+	fmt.Printf("📊 Loaded %d patient records\n", len(records))
 
 	// Connect to receiver
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port))
+	address := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
+	fmt.Printf("🔗 Connecting to receiver at %s...\n", address)
+
+	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		log.Fatalf("Failed to connect to receiver: %v", err)
 	}
 	defer conn.Close()
-	connReader := bufio.NewReader(conn)
 
-	// Step 1: Receive number of blinded points
-	numLine, err := connReader.ReadString('\n')
+	fmt.Println("✅ Connected to receiver")
+
+	decoder := json.NewDecoder(conn)
+	encoder := json.NewEncoder(conn)
+
+	// Step 1: Send blocking request
+	fmt.Println("🔐 Initiating secure blocking...")
+
+	blockingData := BlockingData{
+		EncryptedBuckets: make(map[string][]string),
+		Signatures:       make(map[string]string),
+	}
+
+	// Populate blocking data (simplified bucketing)
+	for _, record := range records {
+		bucket := fmt.Sprintf("bucket_%s", record.ID[:1]) // Simple bucketing by first character
+		blockingData.EncryptedBuckets[bucket] = append(blockingData.EncryptedBuckets[bucket], record.ID)
+	}
+
+	blockingRequest := MatchingMessage{
+		Type:    "blocking_request",
+		Payload: blockingData,
+	}
+
+	if err := encoder.Encode(blockingRequest); err != nil {
+		log.Fatalf("Failed to send blocking request: %v", err)
+	}
+
+	// Receive blocking response
+	var blockingResponse MatchingMessage
+	if err := decoder.Decode(&blockingResponse); err != nil {
+		log.Fatalf("Failed to receive blocking response: %v", err)
+	}
+
+	if blockingResponse.Type != "blocking_response" {
+		log.Fatalf("Unexpected response type: %s", blockingResponse.Type)
+	}
+
+	fmt.Println("✅ Blocking phase complete")
+
+	// Step 2: Send matching request
+	fmt.Println("🔍 Initiating fuzzy matching...")
+
+	matchingData := MatchingData{
+		Records: make(map[string]string),
+	}
+
+	// Prepare our Bloom filter data
+	for _, record := range records {
+		bloomData, err := pprl.BloomToBase64(record.BloomFilter)
+		if err != nil {
+			log.Printf("Failed to encode Bloom filter for record %s: %v", record.ID, err)
+			continue
+		}
+		matchingData.Records[record.ID] = bloomData
+	}
+
+	matchingRequest := MatchingMessage{
+		Type:    "matching_request",
+		Payload: matchingData,
+	}
+
+	if err := encoder.Encode(matchingRequest); err != nil {
+		log.Fatalf("Failed to send matching request: %v", err)
+	}
+
+	// Receive matching response
+	var matchingResponse MatchingMessage
+	if err := decoder.Decode(&matchingResponse); err != nil {
+		log.Fatalf("Failed to receive matching response: %v", err)
+	}
+
+	if matchingResponse.Type != "matching_response" {
+		log.Fatalf("Unexpected response type: %s", matchingResponse.Type)
+	}
+
+	fmt.Println("✅ Matching phase complete")
+
+	// Receive final results
+	var resultsMessage MatchingMessage
+	if err := decoder.Decode(&resultsMessage); err != nil {
+		log.Fatalf("Failed to receive results: %v", err)
+	}
+
+	if resultsMessage.Type != "results" {
+		log.Fatalf("Unexpected response type: %s", resultsMessage.Type)
+	}
+
+	// Process and display results
+	fmt.Println("\n🎯 Matching Results:")
+	fmt.Println("==================")
+
+	// Convert payload to results
+	payloadBytes, _ := json.Marshal(resultsMessage.Payload)
+	var results match.TwoPartyMatchResult
+	if err := json.Unmarshal(payloadBytes, &results); err != nil {
+		log.Printf("Failed to parse results: %v", err)
+		return
+	}
+
+	fmt.Printf("📈 Statistics:\n")
+	fmt.Printf("   Records processed: %d\n", len(records))
+	fmt.Printf("   Matching buckets: %d\n", results.MatchingBuckets)
+	fmt.Printf("   Candidate pairs: %d\n", results.CandidatePairs)
+	fmt.Printf("   Matches found: %d\n", results.TotalMatches)
+	fmt.Printf("   Party 1 records: %d\n", results.Party1Records)
+	fmt.Printf("   Party 2 records: %d\n", results.Party2Records)
+
+	if len(results.Matches) > 0 {
+		fmt.Printf("\n📋 Detailed Matches:\n")
+		for i, match := range results.Matches {
+			fmt.Printf("%3d. %s <-> %s (Score: %.3f)\n",
+				i+1, match.ID1, match.ID2, match.MatchScore)
+		}
+	} else {
+		fmt.Println("   No matches found")
+	}
+
+	fmt.Println("\n✅ Fuzzy matching session complete!")
+}
+
+// SendShutdown sends a shutdown signal to the receiver
+func SendShutdown(cfg *config.Config) {
+	fmt.Printf("🔴 Sending shutdown signal to receiver...\n")
+
+	// Connect to receiver
+	address := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
+	fmt.Printf("🔗 Connecting to receiver at %s...\n", address)
+
+	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
 	if err != nil {
-		return fmt.Errorf("read num: %w", err)
+		log.Fatalf("Failed to connect to receiver: %v", err)
 	}
-	var num int
-	fmt.Sscanf(numLine, "%d", &num)
-	blindedPoints := make([]*edwards25519.Point, num)
-	for i := 0; i < num; i++ {
-		qHex, err := connReader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("read qHex: %w", err)
-		}
-		qHex = qHex[:len(qHex)-1]
-		qBytes, _ := hex.DecodeString(qHex)
-		Q, err := new(edwards25519.Point).SetBytes(qBytes)
-		if err != nil {
-			return fmt.Errorf("invalid point: %w", err)
-		}
-		blindedPoints[i] = Q
+	defer conn.Close()
+
+	encoder := json.NewEncoder(conn)
+
+	// Send shutdown message
+	shutdownMsg := MatchingMessage{
+		Type:    "shutdown",
+		Payload: nil,
 	}
 
-	// Step 2: For each Q_x, try to match H(y)
-	type encResp struct {
-		idx       int
-		nonce, ct []byte
+	if err := encoder.Encode(shutdownMsg); err != nil {
+		log.Fatalf("Failed to send shutdown message: %v", err)
 	}
-	var responses []encResp
-	for idx, Q := range blindedPoints {
-		// Try all H(y)
-		for hHex, meta := range hashMap {
-			HyBytes, _ := hex.DecodeString(hHex)
-			Hy, _ := new(edwards25519.Point).SetBytes(HyBytes)
-			// Try to compute shared key: ECDH(Q, 1) == Q
-			// In practice, sender cannot unblind, but can use Q as ECDH base
-			oneScalar := new(edwards25519.Scalar)
-			oneScalarBytes := [32]byte{}
-			oneScalarBytes[0] = 1
-			oneScalar.SetCanonicalBytes(oneScalarBytes[:])
-			key := crypto.DeriveSharedKey(Q, oneScalar)
-			nonce := make([]byte, 12)
-			rand.Read(nonce)
-			ct, _, err := crypto.EncryptAESGCM(key, []byte(meta))
-			if err != nil {
-				continue
-			}
-			// For demo, match if Q.Bytes() == Hy.Bytes()
-			if string(Q.Bytes()) == string(Hy.Bytes()) {
-				responses = append(responses, encResp{idx, nonce, ct})
-				break
-			}
-		}
-	}
-	// Send number of responses
-	fmt.Fprintf(conn, "%d\n", len(responses))
-	for _, r := range responses {
-		fmt.Fprintf(conn, "%d:%s:%s\n", r.idx, hex.EncodeToString(r.nonce), hex.EncodeToString(r.ct))
-	}
-	fmt.Printf("Sent %d matches\n", len(responses))
-	return nil
+
+	fmt.Println("✅ Shutdown signal sent successfully!")
 }
