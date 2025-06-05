@@ -21,79 +21,79 @@ func main() {
 
 	// --- Add CLI flags ---
 	mode := ""
-	configFile := "config.yaml"
+	configFile := ""
 	flag.StringVar(&mode, "mode", "", "Mode: send, receive, shutdown, or view")
-	flag.StringVar(&configFile, "config", "config.yaml", "Configuration file path")
+	flag.StringVar(&configFile, "config", "", "Configuration file path")
 	flag.Parse()
 
+	// If no mode is provided, use interactive selection
 	if mode == "" {
-		fmt.Println("Please specify mode: -mode=send, -mode=receive, -mode=shutdown, or -mode=view")
-		os.Exit(1)
+		fmt.Println("\n📋 Interactive Mode Selection")
+		fmt.Println("=============================")
+
+		modePrompt := promptui.Select{
+			Label: "Select operation mode",
+			Items: []string{
+				"send - Send data to receiver for matching",
+				"receive - Receive data and perform matching",
+				"shutdown - Send shutdown signal to receiver",
+				"view - View previous match results",
+			},
+		}
+
+		modeIndex, _, err := modePrompt.Run()
+		if err != nil {
+			fmt.Printf("Mode selection failed: %v\n", err)
+			os.Exit(1)
+		}
+
+		switch modeIndex {
+		case 0:
+			mode = "send"
+		case 1:
+			mode = "receive"
+		case 2:
+			mode = "shutdown"
+		case 3:
+			mode = "view"
+		default:
+			fmt.Println("Invalid mode selected")
+			os.Exit(1)
+		}
 	}
 
-	// --- Config file selection ---
-	if configFile != "" {
-		configPath := configFile
-		cfg, err := config.Load(configPath)
-		if err != nil {
-			fmt.Println("Error loading config:", err)
-			os.Exit(1)
-		}
-
-		// --- Handle private key logic ---
-		if cfg.PrivateKey == "" {
-			fmt.Println("No private key found in config. Generating a new one...")
-			priv := crypto.GenerateKey()
-			privBytes := priv.Bytes()
-			cfg.PrivateKey = fmt.Sprintf("%x", privBytes)
-			fmt.Printf("Generated private key (hex): %s\n", cfg.PrivateKey)
-			pubBytes := priv.PublicKey().Bytes()
-			cfg.PublicKey = fmt.Sprintf("%x", pubBytes)
-			fmt.Printf("Derived public key (hex): %s\n", cfg.PublicKey)
-		} else {
-			priv, err := crypto.PrivateKeyFromHex(cfg.PrivateKey)
-			if err != nil {
-				fmt.Println("Invalid private key in config:", err)
+	// Config file selection (except for view mode which doesn't need config)
+	if mode != "view" {
+		if configFile == "" {
+			// List .yaml config files in current directory
+			yamlFiles := []string{}
+			_ = filepath.Walk(".", func(path string, info fs.FileInfo, err error) error {
+				if err == nil && !info.IsDir() && strings.HasSuffix(info.Name(), ".yaml") {
+					yamlFiles = append(yamlFiles, path)
+				}
+				return nil
+			})
+			if len(yamlFiles) == 0 {
+				fmt.Println("❌ No .yaml config files found in current directory")
+				fmt.Println("💡 Please create a config file based on config.example.yaml")
 				os.Exit(1)
 			}
-			pubBytes := priv.PublicKey().Bytes()
-			cfg.PublicKey = fmt.Sprintf("%x", pubBytes)
-		}
 
-		switch mode {
-		case "send":
-			server.RunAsSender(cfg)
-		case "receive":
-			server.RunAsReceiver(cfg)
-		case "shutdown":
-			server.SendShutdown(cfg)
-		case "view":
-			viewMatchResults()
-		default:
-			fmt.Printf("Unknown mode: %s\n", mode)
-			os.Exit(1)
-		}
-	} else {
-		// List .yaml config files in current directory
-		yamlFiles := []string{}
-		_ = filepath.Walk(".", func(path string, info fs.FileInfo, err error) error {
-			if err == nil && !info.IsDir() && strings.HasSuffix(info.Name(), ".yaml") {
-				yamlFiles = append(yamlFiles, path)
+			if len(yamlFiles) == 1 {
+				configFile = yamlFiles[0]
+				fmt.Printf("📁 Using config file: %s\n", configFile)
+			} else {
+				configPrompt := promptui.Select{
+					Label: "Select config file",
+					Items: yamlFiles,
+				}
+				var err error
+				_, configFile, err = configPrompt.Run()
+				if err != nil {
+					fmt.Println("Config selection failed:", err)
+					os.Exit(1)
+				}
 			}
-			return nil
-		})
-		if len(yamlFiles) == 0 {
-			yamlFiles = append(yamlFiles, "config.yaml")
-		}
-
-		configPrompt := promptui.Select{
-			Label: "Select config file",
-			Items: yamlFiles,
-		}
-		_, configFile, err := configPrompt.Run()
-		if err != nil {
-			fmt.Println("Prompt failed:", err)
-			os.Exit(1)
 		}
 
 		cfg, err := config.Load(configFile)
@@ -129,12 +129,13 @@ func main() {
 			server.RunAsReceiver(cfg)
 		case "shutdown":
 			server.SendShutdown(cfg)
-		case "view":
-			viewMatchResults()
 		default:
 			fmt.Printf("Unknown mode: %s\n", mode)
 			os.Exit(1)
 		}
+	} else {
+		// View mode doesn't need config
+		viewMatchResults()
 	}
 }
 

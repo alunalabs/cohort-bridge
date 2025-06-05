@@ -8,8 +8,8 @@ import (
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
 
-// loadPatientRecordsUtil converts CSV data to Bloom filter representations
-func loadPatientRecordsUtil(csvDB *db.CSVDatabase, fields []string) ([]PatientRecord, error) {
+// LoadPatientRecordsUtil converts CSV data to Bloom filter representations
+func LoadPatientRecordsUtil(csvDB *db.CSVDatabase, fields []string) ([]PatientRecord, error) {
 	// Get all records
 	allRecords, err := csvDB.List(0, 1000000) // Large number to get all records
 	if err != nil {

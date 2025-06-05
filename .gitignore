@@ -15,7 +15,9 @@ data/
 
 # Configuration files (keep examples only)
 config.yaml
-config_*.yaml
+config2.yaml
+config_a.yaml
+config_b.yaml
 !config.example.yaml
 !config_example_*.yaml
 
@@ -45,3 +47,11 @@ drafts/
 *.temp
 temp/
 tmp/
+
+# Output files
+*.csv
+*.json
+*.txt
+*.log
+*.out
+*.err

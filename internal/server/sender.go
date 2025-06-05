@@ -24,7 +24,7 @@ func RunAsSender(cfg *config.Config) {
 	}
 
 	// Convert CSV records to Bloom filters using the utility function
-	records, err := loadPatientRecordsUtil(csvDB, cfg.Database.Fields)
+	records, err := LoadPatientRecordsUtil(csvDB, cfg.Database.Fields)
 	if err != nil {
 		log.Fatalf("Failed to load patient records: %v", err)
 	}

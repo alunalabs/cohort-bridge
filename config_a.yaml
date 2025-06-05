@@ -1,6 +1,6 @@
 database:
   type: csv
-  filename: data/patients_a.csv
+  filename: data/patients_a_small.csv
   fields:
     - FIRST
     - LAST

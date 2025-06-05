@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
@@ -49,7 +50,7 @@ func RunAsReceiver(cfg *config.Config) {
 	}
 
 	// Convert CSV records to Bloom filters
-	records, err := loadPatientRecordsUtil(csvDB, cfg.Database.Fields)
+	records, err := LoadPatientRecordsUtil(csvDB, cfg.Database.Fields)
 	if err != nil {
 		log.Fatalf("Failed to load patient records: %v", err)
 	}
@@ -73,13 +74,13 @@ func RunAsReceiver(cfg *config.Config) {
 	}
 
 	fmt.Printf("📞 Connection accepted from %s\n", conn.RemoteAddr())
-	handleConnection(conn, records, csvDB)
+	handleConnection(conn, records, csvDB, cfg.Database.Fields)
 
 	fmt.Println("🔄 Matching session complete. Receiver shutting down automatically.")
 }
 
 // handleConnection handles a single client connection
-func handleConnection(conn net.Conn, records []PatientRecord, csvDB *db.CSVDatabase) {
+func handleConnection(conn net.Conn, records []PatientRecord, csvDB *db.CSVDatabase, configFields []string) {
 	defer conn.Close()
 
 	fmt.Printf("📞 Connection accepted from %s\n", conn.RemoteAddr())
@@ -281,7 +282,7 @@ func handleConnection(conn net.Conn, records []PatientRecord, csvDB *db.CSVDatab
 			detailsFile := fmt.Sprintf("out/match_details_%s.csv", timestamp)
 
 			saveResultsToCSV(actualMatches, matchesFile)
-			saveMatchDetailsToCSV(actualMatches, detailsFile, csvDB)
+			saveMatchDetailsToCSV(actualMatches, detailsFile, csvDB, configFields)
 
 			results := &match.TwoPartyMatchResult{
 				MatchingBuckets: len(records), // All records compared
@@ -337,7 +338,7 @@ func saveResultsToCSV(matches []*match.MatchResult, filename string) {
 }
 
 // saveMatchDetailsToCSV saves match details with patient demographics for debugging
-func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB *db.CSVDatabase) {
+func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB *db.CSVDatabase, fields []string) {
 	file, err := os.Create(filename)
 	if err != nil {
 		log.Printf("Failed to create match details file %s: %v", filename, err)
@@ -345,8 +346,15 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 	}
 	defer file.Close()
 
+	// Build dynamic header based on configured fields
+	header := "Receiver_ID"
+	for _, field := range fields {
+		header += fmt.Sprintf(",Receiver_%s", strings.Title(field))
+	}
+	header += ",Sender_ID,Match_Score,Hamming_Distance,Is_Match\n"
+
 	// Write CSV header
-	file.WriteString("Receiver_ID,Receiver_First,Receiver_Last,Receiver_DOB,Receiver_ZIP,Sender_ID,Match_Score,Hamming_Distance,Is_Match\n")
+	file.WriteString(header)
 
 	// Get all receiver records from CSV
 	allReceiverRecords, err := csvDB.List(0, 1000000)
@@ -365,19 +373,29 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 	for _, match := range matches {
 		receiverRecord, receiverExists := receiverMap[match.ID1]
 		if receiverExists {
-			file.WriteString(fmt.Sprintf("%s,%s,%s,%s,%s,%s,%.3f,%d,%t\n",
-				match.ID1,
-				receiverRecord["first_name"],
-				receiverRecord["last_name"],
-				receiverRecord["dob"],
-				receiverRecord["zip"],
-				match.ID2,
-				match.MatchScore,
-				match.HammingDistance,
-				match.IsMatch))
+			// Build row data based on configured fields
+			row := match.ID1
+			for _, field := range fields {
+				if value, exists := receiverRecord[field]; exists {
+					row += fmt.Sprintf(",%s", value)
+				} else {
+					row += ","
+				}
+			}
+			row += fmt.Sprintf(",%s,%.3f,%d,%t\n",
+				match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch)
+
+			file.WriteString(row)
 		} else {
-			file.WriteString(fmt.Sprintf("%s,,,,,,%s,%.3f,%d,%t\n",
-				match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch))
+			// Build empty row for missing receiver record
+			row := match.ID1
+			for range fields {
+				row += ","
+			}
+			row += fmt.Sprintf(",%s,%.3f,%d,%t\n",
+				match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch)
+
+			file.WriteString(row)
 		}
 	}
 
