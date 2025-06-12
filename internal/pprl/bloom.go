@@ -32,6 +32,28 @@ func NewBloomFilter(m, k uint32) *BloomFilter {
 	}
 }
 
+// NewBloomFilterWithRandomBits returns a BloomFilter with the specified percentage of random bits set.
+// randomBitsPercent should be a value between 0.0 and 1.0 representing the fraction of bits to randomly set.
+func NewBloomFilterWithRandomBits(m, k uint32, randomBitsPercent float64) *BloomFilter {
+	bf := NewBloomFilter(m, k)
+	if bf == nil {
+		return nil
+	}
+
+	// Add random bits if percentage is specified
+	if randomBitsPercent > 0.0 {
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		numRandomBits := int(float64(m) * randomBitsPercent)
+
+		for i := 0; i < numRandomBits; i++ {
+			randomIdx := uint32(rng.Intn(int(m)))
+			bf.setBit(randomIdx)
+		}
+	}
+
+	return bf
+}
+
 // Add inserts a byte-slice (e.g. a q-gram) into the filter.
 // Internally, it runs k different hash‐index computations.
 func (bf *BloomFilter) Add(data []byte) {

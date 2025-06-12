@@ -50,7 +50,11 @@ func RunAsReceiver(cfg *config.Config) {
 	}
 
 	// Convert CSV records to Bloom filters
-	records, err := LoadPatientRecordsUtil(csvDB, cfg.Database.Fields)
+	randomBitsPercent := cfg.Database.RandomBitsPercent
+	if randomBitsPercent > 0.0 {
+		fmt.Printf("🎲 Using %.1f%% random bits in Bloom filters\n", randomBitsPercent*100)
+	}
+	records, err := LoadPatientRecordsUtilWithRandomBits(csvDB, cfg.Database.Fields, randomBitsPercent)
 	if err != nil {
 		log.Fatalf("Failed to load patient records: %v", err)
 	}

@@ -10,6 +10,11 @@ import (
 
 // LoadPatientRecordsUtil converts CSV data to Bloom filter representations
 func LoadPatientRecordsUtil(csvDB *db.CSVDatabase, fields []string) ([]PatientRecord, error) {
+	return LoadPatientRecordsUtilWithRandomBits(csvDB, fields, 0.0)
+}
+
+// LoadPatientRecordsUtilWithRandomBits converts CSV data to Bloom filter representations with configurable random bits
+func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string, randomBitsPercent float64) ([]PatientRecord, error) {
 	// Get all records
 	allRecords, err := csvDB.List(0, 1000000) // Large number to get all records
 	if err != nil {
@@ -18,8 +23,8 @@ func LoadPatientRecordsUtil(csvDB *db.CSVDatabase, fields []string) ([]PatientRe
 
 	var records []PatientRecord
 	for _, record := range allRecords {
-		// Create Bloom filter for this record
-		bf := pprl.NewBloomFilter(1000, 5) // 1000 bits, 5 hash functions
+		// Create Bloom filter for this record with optional random bits
+		bf := pprl.NewBloomFilterWithRandomBits(1000, 5, randomBitsPercent) // 1000 bits, 5 hash functions
 
 		// Create MinHash for this record
 		mh, err := pprl.NewMinHash(1000, 128) // m=1000 (same as BF), s=128 hash functions

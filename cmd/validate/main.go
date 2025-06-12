@@ -60,12 +60,12 @@ func main() {
 	}
 
 	// Convert to patient records
-	records1, err := server.LoadPatientRecordsUtil(csvDB1, cfg1.Database.Fields)
+	records1, err := server.LoadPatientRecordsUtilWithRandomBits(csvDB1, cfg1.Database.Fields, params.RandomBitsPercent)
 	if err != nil {
 		log.Fatalf("Failed to convert dataset 1: %v", err)
 	}
 
-	records2, err := server.LoadPatientRecordsUtil(csvDB2, cfg2.Database.Fields)
+	records2, err := server.LoadPatientRecordsUtilWithRandomBits(csvDB2, cfg2.Database.Fields, params.RandomBitsPercent)
 	if err != nil {
 		log.Fatalf("Failed to convert dataset 2: %v", err)
 	}
@@ -104,6 +104,7 @@ type ValidationParameters struct {
 	JaccardThreshold   float64
 	CandidateThreshold float64 // Minimum similarity score to be considered a candidate
 	MatchThreshold     uint32  // Hamming distance threshold for matches
+	RandomBitsPercent  float64 // Percentage of random bits to add to Bloom filters (0.0-1.0)
 }
 
 func getValidationParameters() (*ValidationParameters, error) {
@@ -147,6 +148,20 @@ func getValidationParameters() (*ValidationParameters, error) {
 			params.MatchThreshold = 100 // Default Hamming threshold
 		}
 
+		// Optional random bits percentage (default if not provided)
+		if len(args) >= 7 {
+			if randomBits, err := strconv.ParseFloat(args[6], 64); err == nil {
+				if randomBits < 0.0 || randomBits > 1.0 {
+					return nil, fmt.Errorf("random bits percentage must be between 0.0 and 1.0: %f", randomBits)
+				}
+				params.RandomBitsPercent = randomBits
+			} else {
+				return nil, fmt.Errorf("invalid random bits percentage: %s", args[6])
+			}
+		} else {
+			params.RandomBitsPercent = 0.0 // Default: no random bits
+		}
+
 		fmt.Printf("📝 Using arguments:\n")
 		fmt.Printf("  Config 1: %s\n", params.Config1Path)
 		fmt.Printf("  Config 2: %s\n", params.Config2Path)
@@ -154,12 +169,14 @@ func getValidationParameters() (*ValidationParameters, error) {
 		fmt.Printf("  Output: %s\n", params.OutputPath)
 		fmt.Printf("  Candidate Threshold: %.3f\n", params.CandidateThreshold)
 		fmt.Printf("  Hamming Threshold: %d\n", params.MatchThreshold)
+		fmt.Printf("  Random Bits Percent: %.3f\n", params.RandomBitsPercent)
 
 	} else {
-		fmt.Printf("❌ Usage: %s <config1> <config2> <ground_truth> [output_file] [candidate_threshold] [hamming_threshold]\n", os.Args[0])
-		fmt.Printf("Example: %s config_a.yaml config_b.yaml data/expected_matches.csv validation_results.csv 0.95 100\n", os.Args[0])
+		fmt.Printf("❌ Usage: %s <config1> <config2> <ground_truth> [output_file] [candidate_threshold] [hamming_threshold] [random_bits_percent]\n", os.Args[0])
+		fmt.Printf("Example: %s config_a.yaml config_b.yaml data/expected_matches.csv validation_results.csv 0.95 100 0.05\n", os.Args[0])
 		fmt.Printf("  candidate_threshold: Minimum similarity score to be considered (default: 0.95)\n")
 		fmt.Printf("  hamming_threshold: Maximum Hamming distance for match (default: 100)\n")
+		fmt.Printf("  random_bits_percent: Percentage of random bits in Bloom filters 0.0-1.0 (default: 0.0)\n")
 		return nil, fmt.Errorf("insufficient arguments provided")
 	}
 
@@ -297,8 +314,10 @@ type ValidationResult struct {
 	MissedMatches              []string
 	MissedMatchPairs           []MatchPair // False negatives with scores
 	FalseMatches               []MatchPair
-	LowestGroundTruthScore     float64 // Lowest score among all ground truth pairs (TP + FN)
-	HighestNonGroundTruthScore float64 // Highest score among all non-ground truth pairs (FP + TN)
+	LowestGroundTruthScore     float64   // Lowest score among all ground truth pairs (TP + FN)
+	LowestGroundTruthPair      MatchPair // The pair that gave the lowest ground truth score
+	HighestNonGroundTruthScore float64   // Highest score among all non-ground truth pairs (FP + TN)
+	HighestNonGroundTruthPair  MatchPair // The pair that gave the highest non-ground truth score
 }
 
 type MatchPair struct {
@@ -436,6 +455,8 @@ func validateResults(matches []*match.MatchResult, allComparisons []*match.Match
 	// Calculate lowest score for actual match and highest score for missed match
 	lowestGroundTruthScore := 1.0     // Lowest score among all ground truth pairs (TP + FN)
 	highestNonGroundTruthScore := 0.0 // Highest score among all non-ground truth pairs (FP + TN)
+	var lowestGroundTruthPair MatchPair
+	var highestNonGroundTruthPair MatchPair
 
 	// Create a set of ground truth pairs for quick lookup
 	groundTruthPairs := make(map[string]bool)
@@ -452,17 +473,29 @@ func validateResults(matches []*match.MatchResult, allComparisons []*match.Match
 			// This is a ground truth pair (TP or FN)
 			if comparison.MatchScore < lowestGroundTruthScore {
 				lowestGroundTruthScore = comparison.MatchScore
+				lowestGroundTruthPair = MatchPair{
+					ID1:   comparison.ID1,
+					ID2:   comparison.ID2,
+					Score: comparison.MatchScore,
+				}
 			}
 		} else {
 			// This is NOT a ground truth pair (FP or TN)
 			if comparison.MatchScore > highestNonGroundTruthScore {
 				highestNonGroundTruthScore = comparison.MatchScore
+				highestNonGroundTruthPair = MatchPair{
+					ID1:   comparison.ID1,
+					ID2:   comparison.ID2,
+					Score: comparison.MatchScore,
+				}
 			}
 		}
 	}
 
 	result.LowestGroundTruthScore = lowestGroundTruthScore
+	result.LowestGroundTruthPair = lowestGroundTruthPair
 	result.HighestNonGroundTruthScore = highestNonGroundTruthScore
+	result.HighestNonGroundTruthPair = highestNonGroundTruthPair
 
 	return result
 }
@@ -484,8 +517,10 @@ func displayValidationResults(validation *ValidationResult, groundTruthCount, ma
 	fmt.Printf("  F1-Score: %.3f\n", validation.F1Score)
 
 	fmt.Printf("\n📈 Score Analysis:\n")
-	fmt.Printf("  Lowest score for ground truth pairs (TP+FN): %.3f\n", validation.LowestGroundTruthScore)
-	fmt.Printf("  Highest score for non-ground truth pairs (FP+TN): %.3f\n", validation.HighestNonGroundTruthScore)
+	fmt.Printf("  Lowest score for ground truth pairs (TP+FN): %.3f (ID1: %s, ID2: %s)\n",
+		validation.LowestGroundTruthScore, validation.LowestGroundTruthPair.ID1, validation.LowestGroundTruthPair.ID2)
+	fmt.Printf("  Highest score for non-ground truth pairs (FP+TN): %.3f (ID1: %s, ID2: %s)\n",
+		validation.HighestNonGroundTruthScore, validation.HighestNonGroundTruthPair.ID1, validation.HighestNonGroundTruthPair.ID2)
 	if validation.HighestNonGroundTruthScore > validation.LowestGroundTruthScore {
 		fmt.Printf("  ⚠️  Score overlap detected: Some non-matches have higher scores than true matches!\n")
 	} else {
@@ -571,7 +606,11 @@ func saveValidationResults(validation *ValidationResult, outputPath string) erro
 	writer.Write([]string{"Recall", fmt.Sprintf("%.6f", validation.Recall)})
 	writer.Write([]string{"F1_Score", fmt.Sprintf("%.6f", validation.F1Score)})
 	writer.Write([]string{"Lowest_Ground_Truth_Score", fmt.Sprintf("%.6f", validation.LowestGroundTruthScore)})
+	writer.Write([]string{"Lowest_Ground_Truth_Pair_ID1", validation.LowestGroundTruthPair.ID1})
+	writer.Write([]string{"Lowest_Ground_Truth_Pair_ID2", validation.LowestGroundTruthPair.ID2})
 	writer.Write([]string{"Highest_Non_Ground_Truth_Score", fmt.Sprintf("%.6f", validation.HighestNonGroundTruthScore)})
+	writer.Write([]string{"Highest_Non_Ground_Truth_Pair_ID1", validation.HighestNonGroundTruthPair.ID1})
+	writer.Write([]string{"Highest_Non_Ground_Truth_Pair_ID2", validation.HighestNonGroundTruthPair.ID2})
 
 	// Write detailed results
 	writer.Write([]string{""}) // Empty row

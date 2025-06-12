@@ -8,15 +8,16 @@ import (
 
 type Config struct {
 	Database struct {
-		Type     string   `yaml:"type"`
-		Host     string   `yaml:"host"`
-		Port     int      `yaml:"port"`
-		User     string   `yaml:"user"`
-		Password string   `yaml:"password"`
-		DBName   string   `yaml:"dbname"`
-		Table    string   `yaml:"table"`
-		Filename string   `yaml:"filename"`
-		Fields   []string `yaml:"fields"`
+		Type              string   `yaml:"type"`
+		Host              string   `yaml:"host"`
+		Port              int      `yaml:"port"`
+		User              string   `yaml:"user"`
+		Password          string   `yaml:"password"`
+		DBName            string   `yaml:"dbname"`
+		Table             string   `yaml:"table"`
+		Filename          string   `yaml:"filename"`
+		Fields            []string `yaml:"fields"`
+		RandomBitsPercent float64  `yaml:"random_bits_percent"`
 	} `yaml:"database"`
 	Peer struct {
 		Host string `yaml:"host"`
