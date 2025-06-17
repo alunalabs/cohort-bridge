@@ -16,9 +16,10 @@ import (
 
 // PatientRecord represents a patient with Bloom filter representation
 type PatientRecord struct {
-	ID          string
-	BloomFilter *pprl.BloomFilter
-	MinHash     *pprl.MinHash
+	ID               string
+	BloomFilter      *pprl.BloomFilter
+	MinHash          *pprl.MinHash
+	MinHashSignature []uint32 // Pre-computed MinHash signature
 }
 
 // MatchingMessage represents the protocol messages

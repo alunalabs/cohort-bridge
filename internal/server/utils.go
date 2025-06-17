@@ -4,10 +4,26 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
+
+// Global shared MinHash instance to ensure consistent parameters across all datasets
+var (
+	globalMinHashInstance *pprl.MinHash
+	globalMinHashOnce     sync.Once
+)
+
+// GetGlobalMinHash returns a shared MinHash instance with consistent parameters
+func GetGlobalMinHash() (*pprl.MinHash, error) {
+	var err error
+	globalMinHashOnce.Do(func() {
+		globalMinHashInstance, err = pprl.NewMinHash(1000, 128) // m=1000 (same as BF), s=128 hash functions
+	})
+	return globalMinHashInstance, err
+}
 
 // EnsureOutputDirectory creates the output directory if it doesn't exist
 func EnsureOutputDirectory() error {
@@ -67,15 +83,21 @@ func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string
 		return nil, fmt.Errorf("failed to list records: %v", err)
 	}
 
+	// Get the GLOBAL shared MinHash instance to ensure consistent parameters across ALL datasets
+	sharedMinHash, err := GetGlobalMinHash()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get global shared MinHash: %v", err)
+	}
+
 	var records []PatientRecord
 	for _, record := range allRecords {
 		// Create Bloom filter for this record with optional random bits
 		bf := pprl.NewBloomFilterWithRandomBits(1000, 5, randomBitsPercent) // 1000 bits, 5 hash functions
 
-		// Create MinHash for this record
-		mh, err := pprl.NewMinHash(1000, 128) // m=1000 (same as BF), s=128 hash functions
+		// Create MinHash instance with SAME parameters as shared instance
+		recordMinHash, err := recreateMinHashFromShared(sharedMinHash)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create MinHash: %v", err)
+			return nil, fmt.Errorf("failed to create MinHash for record: %v", err)
 		}
 
 		// Add configured fields to Bloom filter using q-grams
@@ -92,16 +114,17 @@ func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string
 			}
 		}
 
-		// Compute MinHash signature from Bloom filter
-		_, err = mh.ComputeSignature(bf)
+		// Compute MinHash signature from Bloom filter ONCE and store it
+		signature, err := recordMinHash.ComputeSignature(bf)
 		if err != nil {
 			return nil, fmt.Errorf("failed to compute MinHash signature: %v", err)
 		}
 
 		records = append(records, PatientRecord{
-			ID:          record["id"], // Assuming 'id' is the primary key
-			BloomFilter: bf,
-			MinHash:     mh,
+			ID:               record["id"], // Assuming 'id' is the primary key
+			BloomFilter:      bf,
+			MinHash:          recordMinHash,
+			MinHashSignature: signature, // Store the computed signature
 		})
 	}
 
@@ -112,6 +135,24 @@ func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string
 func normalizeFieldUtil(value string) string {
 	// Convert to lowercase and remove spaces for consistent matching
 	return strings.ToLower(strings.ReplaceAll(value, " ", ""))
+}
+
+// recreateMinHashFromShared creates a new MinHash instance with the same parameters as the shared one
+func recreateMinHashFromShared(sharedMinHash *pprl.MinHash) (*pprl.MinHash, error) {
+	// Serialize the shared MinHash to get its parameters
+	data, err := sharedMinHash.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal shared MinHash: %v", err)
+	}
+
+	// Create a new MinHash instance and deserialize the parameters
+	newMinHash := &pprl.MinHash{}
+	err = newMinHash.UnmarshalBinary(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal MinHash: %v", err)
+	}
+
+	return newMinHash, nil
 }
 
 // generateQGrams creates character q-grams from a string

@@ -63,6 +63,11 @@ func (mh *MinHash) ComputeSignature(bf *BloomFilter) ([]uint32, error) {
 	}
 	m := bf.m
 
+	// Reset signature to initial state (prime values) before computation
+	for i := uint32(0); i < mh.s; i++ {
+		mh.signature[i] = mh.prime
+	}
+
 	// Iterate over all bits in bf. For any bit that's 1, record its index.
 	for blockIdx, blockVal := range bf.bitArray {
 		if blockVal == 0 {

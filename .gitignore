@@ -54,3 +54,6 @@ tmp/
 *.log
 *.out
 *.err
+
+# testing
+cmd/test
