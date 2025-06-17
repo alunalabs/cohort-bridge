@@ -283,4 +283,50 @@ Contributions are welcome! Please read our contributing guidelines and submit pu
 
 ## 📞 Support
 
-For questions or support, please [contact information or issue tracker]. 
+For questions or support, please [contact information or issue tracker].
+
+## Output Directory Structure
+
+All generated outputs are automatically saved to the `out/` directory:
+
+- **Match Results**: `out/matches_YYYYMMDD_HHMMSS_<connection_id>.csv`
+- **Detailed Results**: `out/match_details_YYYYMMDD_HHMMSS_<connection_id>.csv`
+- **Validation Results**: `out/validation_results.csv` (when using validate command)
+- **Test Outputs**: `out/dataset1.jsonl`, `out/dataset2.jsonl`, etc.
+
+All log files are saved to the `logs/` directory (when logging is enabled).
+
+The system automatically creates these directories if they don't exist.
+
+## Privacy-Preserving Record Linkage (PPRL) System
+
+This system provides secure, privacy-preserving record linkage between two parties using Bloom filters and cryptographic protocols. It enables organizations to identify matching records without sharing raw personally identifiable information (PHI).
+
+## 🔐 **NEW: Tokenization Mode**
+
+The system now supports **two modes of operation**:
+
+### **Raw PHI Mode** (Original)
+- Processes raw patient data directly during matching
+- Suitable for trusted environments
+- PHI is converted to Bloom filters in real-time
+
+### **Tokenized Mode** (Enhanced Security)
+- **Pre-processes PHI** into privacy-preserving tokens using the `tokenize` tool
+- **Separates PHI handling** from the matching process
+- **Enhanced security** - raw PHI never leaves the tokenization environment
+- **HIPAA-friendly** deployment with isolated PHI processing
+
+```bash
+# Step 1: Tokenize your data (secure environment)
+./tokenize.exe -input data/patients_a.csv -output out/tokens_party_a.json
+
+# Step 2: Run matching with tokens (can be less secure environment)
+./agent.exe -mode receive -config config_tokenized.yaml
+```
+
+See [TOKENIZATION_GUIDE.md](TOKENIZATION_GUIDE.md) for complete documentation.
+
+## Features
+
+// ... existing content ... 

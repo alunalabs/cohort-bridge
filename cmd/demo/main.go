@@ -59,16 +59,19 @@ func main() {
 
 // runTestMode runs the comprehensive test harness with user-configurable parameters
 func runTestMode() {
-	fmt.Println("\n🧪 Test Harness Configuration")
-	fmt.Println("=============================")
+	fmt.Println("📊 Test Mode: Generating synthetic data and testing matching algorithms")
 
-	// Get test parameters from user
 	params, err := getTestParameters()
 	if err != nil {
-		log.Fatalf("Failed to get test parameters: %v", err)
+		log.Fatal(err)
 	}
 
 	// Ensure output directory exists
+	if err := os.MkdirAll("out", 0755); err != nil {
+		log.Fatalf("Failed to create output directory: %v", err)
+	}
+
+	// Create output directory if it doesn't exist
 	if err := os.MkdirAll(params.OutputDir, 0755); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
@@ -317,7 +320,7 @@ func runValidationTestMode() {
 		BloomFilterSize:   1024,
 		BloomHashCount:    8,
 		MinHashSignatures: 64,
-		OutputDir:         "./validation_output",
+		OutputDir:         "./out",
 	}
 
 	pipelineConfig := &match.PipelineConfig{
@@ -330,7 +333,7 @@ func runValidationTestMode() {
 			JaccardThreshold:  0.7,
 			UseSecureProtocol: false,
 		},
-		OutputPath:    "./validation_output/results.json",
+		OutputPath:    "./out/results.json",
 		EnableStats:   true,
 		MaxCandidates: 10000,
 	}
@@ -605,7 +608,7 @@ func getTestParameters() (*TestParameters, error) {
 
 	prompt = promptui.Prompt{
 		Label:   "Output directory",
-		Default: "./test_output",
+		Default: "./out",
 	}
 	params.OutputDir, err = prompt.Run()
 	if err != nil {

@@ -5,6 +5,7 @@
 package pprl
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"hash/fnv"
@@ -208,4 +209,37 @@ func popcount16(x uint16) int {
 		count++
 	}
 	return count
+}
+
+// ToBase64 serializes the Bloom filter to a base64 string
+func (bf *BloomFilter) ToBase64() (string, error) {
+	data, err := bf.MarshalBinary()
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+// FromBase64 deserializes a Bloom filter from a base64 string
+func (bf *BloomFilter) FromBase64(encoded string) error {
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return err
+	}
+	return bf.UnmarshalBinary(data)
+}
+
+// BloomToBase64 creates a base64 string from a Bloom filter
+func BloomToBase64(bf *BloomFilter) (string, error) {
+	return bf.ToBase64()
+}
+
+// BloomFromBase64 creates a Bloom filter from a base64 string
+func BloomFromBase64(encoded string) (*BloomFilter, error) {
+	bf := &BloomFilter{}
+	err := bf.FromBase64(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return bf, nil
 }

@@ -2,11 +2,57 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
+
+// EnsureOutputDirectory creates the output directory if it doesn't exist
+func EnsureOutputDirectory() error {
+	outputDir := "out"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory '%s': %w", outputDir, err)
+	}
+	return nil
+}
+
+// EnsureLogsDirectory creates the logs directory if it doesn't exist
+func EnsureLogsDirectory() error {
+	logsDir := "logs"
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create logs directory '%s': %w", logsDir, err)
+	}
+	return nil
+}
+
+// LoadTokenizedRecords loads patient records from tokenized data
+func LoadTokenizedRecords(filename string) ([]PatientRecord, error) {
+	// Load tokenized database
+	tokenDB, err := db.NewTokenizedDatabase(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tokenized database: %w", err)
+	}
+
+	// Convert to Bloom filter records
+	bfRecords, err := tokenDB.ToBloomFilterRecords()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert to Bloom filter records: %w", err)
+	}
+
+	// Convert to PatientRecord format
+	var records []PatientRecord
+	for _, bfRecord := range bfRecords {
+		records = append(records, PatientRecord{
+			ID:          bfRecord.ID,
+			BloomFilter: bfRecord.BloomFilter,
+			MinHash:     bfRecord.MinHash,
+		})
+	}
+
+	return records, nil
+}
 
 // LoadPatientRecordsUtil converts CSV data to Bloom filter representations
 func LoadPatientRecordsUtil(csvDB *db.CSVDatabase, fields []string) ([]PatientRecord, error) {

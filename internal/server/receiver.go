@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strings"
@@ -39,72 +38,229 @@ type MatchingData struct {
 	Records map[string]string `json:"records"` // ID -> base64 encoded Bloom filter
 }
 
-// RunAsReceiver implements the receiver mode with fuzzy matching
+// TimeoutConn wraps a net.Conn with configurable timeouts
+type TimeoutConn struct {
+	conn         net.Conn
+	readTimeout  time.Duration
+	writeTimeout time.Duration
+	idleTimeout  time.Duration
+}
+
+func NewTimeoutConn(conn net.Conn, cfg *config.Config) *TimeoutConn {
+	return &TimeoutConn{
+		conn:         conn,
+		readTimeout:  cfg.Timeouts.ReadTimeout,
+		writeTimeout: cfg.Timeouts.WriteTimeout,
+		idleTimeout:  cfg.Timeouts.IdleTimeout,
+	}
+}
+
+func (tc *TimeoutConn) Read(b []byte) (n int, err error) {
+	if tc.readTimeout > 0 {
+		tc.conn.SetReadDeadline(time.Now().Add(tc.readTimeout))
+	}
+	return tc.conn.Read(b)
+}
+
+func (tc *TimeoutConn) Write(b []byte) (n int, err error) {
+	if tc.writeTimeout > 0 {
+		tc.conn.SetWriteDeadline(time.Now().Add(tc.writeTimeout))
+	}
+	return tc.conn.Write(b)
+}
+
+func (tc *TimeoutConn) Close() error {
+	return tc.conn.Close()
+}
+
+func (tc *TimeoutConn) RemoteAddr() net.Addr {
+	return tc.conn.RemoteAddr()
+}
+
+func (tc *TimeoutConn) SetDeadline(t time.Time) error {
+	return tc.conn.SetDeadline(t)
+}
+
+// RunAsReceiver implements the receiver mode with enhanced security and logging
 func RunAsReceiver(cfg *config.Config) {
-	fmt.Printf("🔄 Starting receiver on port %d...\n", cfg.ListenPort)
+	sessionID := fmt.Sprintf("recv-%d", time.Now().Unix())
 
-	// Load CSV data
-	csvDB, err := db.NewCSVDatabase(cfg.Database.Filename)
-	if err != nil {
-		log.Fatalf("Failed to load CSV database: %v", err)
+	// Ensure required directories exist
+	if err := EnsureOutputDirectory(); err != nil {
+		fmt.Printf("Warning: Failed to create output directory: %v\n", err)
+	}
+	if err := EnsureLogsDirectory(); err != nil {
+		fmt.Printf("Warning: Failed to create logs directory: %v\n", err)
 	}
 
-	// Convert CSV records to Bloom filters
-	randomBitsPercent := cfg.Database.RandomBitsPercent
-	if randomBitsPercent > 0.0 {
-		fmt.Printf("🎲 Using %.1f%% random bits in Bloom filters\n", randomBitsPercent*100)
+	// Initialize logging
+	if err := InitLogger(cfg, sessionID); err != nil {
+		fmt.Printf("Warning: Failed to initialize logger: %v\n", err)
 	}
-	records, err := LoadPatientRecordsUtilWithRandomBits(csvDB, cfg.Database.Fields, randomBitsPercent)
-	if err != nil {
-		log.Fatalf("Failed to load patient records: %v", err)
+	defer GetLogger().Close()
+
+	Info("Starting receiver mode with session ID: %s", sessionID)
+
+	// Initialize security manager
+	securityManager := NewSecurityManager(cfg)
+	Info("Security manager initialized with %d allowed IPs", len(cfg.Security.AllowedIPs))
+
+	// Load patient records based on configuration
+	var records []PatientRecord
+	var csvDB *db.CSVDatabase
+	var err error
+
+	if cfg.Database.IsTokenized {
+		// Load tokenized data
+		Info("Loading tokenized data from: %s", cfg.Database.TokenizedFile)
+		records, err = LoadTokenizedRecords(cfg.Database.TokenizedFile)
+		if err != nil {
+			Error("Failed to load tokenized records: %v", err)
+			return
+		}
+		Info("Successfully loaded %d tokenized records", len(records))
+
+		// Note: csvDB will be nil for tokenized data, which is fine since we don't need raw PHI
+	} else {
+		// Load raw PHI data and convert to Bloom filters
+		Info("Loading CSV database from: %s", cfg.Database.Filename)
+		csvDB, err = db.NewCSVDatabase(cfg.Database.Filename)
+		if err != nil {
+			Error("Failed to load CSV database: %v", err)
+			return
+		}
+
+		// Convert CSV records to Bloom filters
+		randomBitsPercent := cfg.Database.RandomBitsPercent
+		if randomBitsPercent > 0.0 {
+			Info("Using %.1f%% random bits in Bloom filters", randomBitsPercent*100)
+		}
+
+		Info("Converting CSV records to Bloom filters...")
+		records, err = LoadPatientRecordsUtilWithRandomBits(csvDB, cfg.Database.Fields, randomBitsPercent)
+		if err != nil {
+			Error("Failed to load patient records: %v", err)
+			return
+		}
+		Info("Successfully loaded %d patient records", len(records))
 	}
 
-	fmt.Printf("📊 Loaded %d patient records\n", len(records))
-
-	// Start TCP server
+	// Start TCP server with timeouts
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ListenPort))
 	if err != nil {
-		log.Fatalf("Failed to start listener: %v", err)
+		Error("Failed to start listener: %v", err)
+		return
 	}
 	defer listener.Close()
 
-	fmt.Printf("📡 Listening for connections on port %d\n", cfg.ListenPort)
-	fmt.Println("💡 Receiver will automatically shutdown after processing one matching session")
+	Info("Listening for connections on port %d", cfg.ListenPort)
+	Info("Security settings: IP check=%v, Rate limit=%d/min, Max connections=%d",
+		cfg.Security.RequireIPCheck, cfg.Security.RateLimitPerMin, cfg.Security.MaxConnections)
 
-	// Accept only one connection and process it
-	conn, err := listener.Accept()
-	if err != nil {
-		log.Fatalf("Failed to accept connection: %v", err)
+	// Set listener deadline for clean shutdown capability
+	for {
+		// Set accept timeout
+		if err := listener.(*net.TCPListener).SetDeadline(time.Now().Add(cfg.Timeouts.ConnectionTimeout)); err != nil {
+			Error("Failed to set listener deadline: %v", err)
+			break
+		}
+
+		conn, err := listener.Accept()
+		if err != nil {
+			// Check if this is a timeout (expected) or real error
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				Debug("Accept timeout, checking for shutdown signal...")
+				continue
+			}
+			Error("Failed to accept connection: %v", err)
+			break
+		}
+
+		// Handle connection in goroutine for concurrent processing
+		go handleSecureConnection(conn, records, csvDB, cfg, securityManager, sessionID)
 	}
 
-	fmt.Printf("📞 Connection accepted from %s\n", conn.RemoteAddr())
-	handleConnection(conn, records, csvDB, cfg.Database.Fields)
-
-	fmt.Println("🔄 Matching session complete. Receiver shutting down automatically.")
+	Info("Receiver shutting down")
 }
 
-// handleConnection handles a single client connection
-func handleConnection(conn net.Conn, records []PatientRecord, csvDB *db.CSVDatabase, configFields []string) {
-	defer conn.Close()
+// handleSecureConnection handles a single client connection with full security and logging
+func handleSecureConnection(conn net.Conn, records []PatientRecord, csvDB *db.CSVDatabase,
+	cfg *config.Config, securityManager *SecurityManager, sessionID string) {
 
-	fmt.Printf("📞 Connection accepted from %s\n", conn.RemoteAddr())
+	remoteAddr := conn.RemoteAddr().String()
+	connID := fmt.Sprintf("%s-%d", sessionID, time.Now().UnixNano())
+
+	Info("New connection attempt from %s (Connection ID: %s)", remoteAddr, connID)
+
+	// Apply security validation
+	if err := securityManager.ValidateConnection(remoteAddr); err != nil {
+		Error("Connection rejected from %s: %v", remoteAddr, err)
+		conn.Close()
+		return
+	}
+
+	// Record successful connection
+	securityManager.RecordConnection(remoteAddr)
+	defer securityManager.RecordDisconnection(remoteAddr)
+
+	// Wrap connection with timeouts
+	timeoutConn := NewTimeoutConn(conn, cfg)
+	defer timeoutConn.Close()
+
+	Info("Connection accepted from %s (ID: %s)", remoteAddr, connID)
+	Audit("CONNECTION_ACCEPTED", map[string]interface{}{
+		"remote_addr":   remoteAddr,
+		"connection_id": connID,
+		"session_id":    sessionID,
+		"stats":         securityManager.GetConnectionStats(),
+	})
+
+	// Set initial handshake timeout
+	if err := timeoutConn.SetDeadline(time.Now().Add(cfg.Timeouts.HandshakeTimeout)); err != nil {
+		Error("Failed to set handshake deadline: %v", err)
+		return
+	}
+
+	// Handle the protocol
+	if err := handleMatchingProtocol(timeoutConn, records, csvDB, cfg, connID); err != nil {
+		Error("Protocol error for connection %s: %v", connID, err)
+		Audit("PROTOCOL_ERROR", map[string]interface{}{
+			"connection_id": connID,
+			"remote_addr":   remoteAddr,
+			"error":         err.Error(),
+		})
+		return
+	}
+
+	Info("Successfully completed matching session for connection %s", connID)
+	Audit("SESSION_COMPLETED", map[string]interface{}{
+		"connection_id": connID,
+		"remote_addr":   remoteAddr,
+		"session_id":    sessionID,
+	})
+}
+
+// handleMatchingProtocol implements the secure matching protocol with timeouts
+func handleMatchingProtocol(conn *TimeoutConn, records []PatientRecord, csvDB *db.CSVDatabase,
+	cfg *config.Config, connID string) error {
+
+	Debug("Starting matching protocol for connection %s", connID)
 
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
 
-	// Convert our records to pprl format for potential future pipeline use
+	// Convert our records to pprl format
 	var pprlRecords []*pprl.Record
 	for _, record := range records {
 		bloomData, err := pprl.BloomToBase64(record.BloomFilter)
 		if err != nil {
-			log.Printf("Failed to encode Bloom filter for record %s: %v", record.ID, err)
+			Warn("Failed to encode Bloom filter for record %s: %v", record.ID, err)
 			continue
 		}
 
-		// Get MinHash signature
 		sig, err := record.MinHash.ComputeSignature(record.BloomFilter)
 		if err != nil {
-			log.Printf("Failed to compute MinHash signature for record %s: %v", record.ID, err)
+			Warn("Failed to compute MinHash signature for record %s: %v", record.ID, err)
 			continue
 		}
 
@@ -115,237 +271,265 @@ func handleConnection(conn net.Conn, records []PatientRecord, csvDB *db.CSVDatab
 		})
 	}
 
+	Debug("Converted %d records to PPRL format", len(pprlRecords))
+
+	// Protocol handling loop with proper timeouts
 	for {
-		var msg MatchingMessage
-		if err := decoder.Decode(&msg); err != nil {
-			if err.Error() != "EOF" {
-				log.Printf("Failed to decode message: %v", err)
-			}
-			break
+		// Reset deadline for each message
+		if err := conn.SetDeadline(time.Now().Add(cfg.Timeouts.ReadTimeout)); err != nil {
+			return fmt.Errorf("failed to set read deadline: %w", err)
 		}
 
+		var msg MatchingMessage
+		if err := decoder.Decode(&msg); err != nil {
+			if err.Error() == "EOF" {
+				Debug("Client closed connection for %s", connID)
+				return nil
+			}
+			return fmt.Errorf("failed to decode message: %w", err)
+		}
+
+		Debug("Received message type: %s for connection %s", msg.Type, connID)
+
 		switch msg.Type {
+		case "shutdown":
+			Info("Received shutdown signal from %s", connID)
+			return nil
+
 		case "blocking_request":
-			fmt.Println("🔐 Processing blocking request...")
-
-			// Send back our blocking data
-			ourBlocking := BlockingData{
-				EncryptedBuckets: make(map[string][]string),
-				Signatures:       make(map[string]string),
-			}
-
-			// Simple bucketing for demo
-			for _, record := range records {
-				bucket := fmt.Sprintf("bucket_%s", record.ID[:1])
-				ourBlocking.EncryptedBuckets[bucket] = append(ourBlocking.EncryptedBuckets[bucket], record.ID)
-			}
-
-			response := MatchingMessage{
-				Type:    "blocking_response",
-				Payload: ourBlocking,
-			}
-
-			if err := encoder.Encode(response); err != nil {
-				log.Printf("Failed to send blocking response: %v", err)
-				return
+			if err := handleBlockingRequest(encoder, records, connID); err != nil {
+				return fmt.Errorf("blocking request failed: %w", err)
 			}
 
 		case "matching_request":
-			fmt.Println("🔍 Processing matching request...")
-
-			// Parse sender's matching data
-			payloadBytes, _ := json.Marshal(msg.Payload)
-			var senderMatching MatchingData
-			json.Unmarshal(payloadBytes, &senderMatching)
-
-			// Perform real fuzzy matching between sender and receiver records
-			matchResults := make([]*match.MatchResult, 0)
-
-			// Create fuzzy matcher with appropriate thresholds
-			fuzzyConfig := &match.FuzzyMatchConfig{
-				HammingThreshold:  200, // Allow up to 200 bit differences
-				JaccardThreshold:  0.5, // Require at least 50% Jaccard similarity
-				UseSecureProtocol: false,
+			if err := handleMatchingRequest(encoder, msg, pprlRecords, csvDB, cfg, connID); err != nil {
+				return fmt.Errorf("matching request failed: %w", err)
 			}
-
-			// Compare ALL receiver records with ALL sender records (not just same IDs)
-			fmt.Printf("🔍 Comparing %d receiver records with %d sender records\n",
-				len(pprlRecords), len(senderMatching.Records))
-
-			for _, receiverRecord := range pprlRecords {
-				for senderID, senderBloomData := range senderMatching.Records {
-					// Compare EVERY receiver record with EVERY sender record
-					// This is the correct approach for finding actual matches
-
-					// Decode Bloom filters for comparison
-					receiverBF, err := pprl.BloomFromBase64(receiverRecord.BloomData)
-					if err != nil {
-						log.Printf("Failed to decode receiver Bloom filter: %v", err)
-						continue
-					}
-
-					senderBF, err := pprl.BloomFromBase64(senderBloomData)
-					if err != nil {
-						log.Printf("Failed to decode sender Bloom filter: %v", err)
-						continue
-					}
-
-					// Calculate Hamming distance
-					hammingDist, err := receiverBF.HammingDistance(senderBF)
-					if err != nil {
-						log.Printf("Failed to calculate Hamming distance: %v", err)
-						continue
-					}
-
-					// Determine if this is a match based on thresholds
-					isMatch := hammingDist <= fuzzyConfig.HammingThreshold
-
-					// Calculate match score
-					matchScore := 1.0
-					if hammingDist > 0 {
-						bfSize := receiverBF.GetSize()
-						matchScore = 1.0 - (float64(hammingDist) / float64(bfSize))
-					}
-
-					// Only add to results if similarity is high enough (potential match)
-					// Use a stricter threshold for reporting to avoid too many false positives
-					if matchScore >= 0.95 { // Lowered from 0.98 to capture genuine matches
-						result := &match.MatchResult{
-							ID1:               receiverRecord.ID,
-							ID2:               senderID,
-							IsMatch:           isMatch,
-							HammingDistance:   hammingDist,
-							JaccardSimilarity: matchScore, // Use match score as similarity estimate
-							MatchScore:        matchScore,
-						}
-
-						matchResults = append(matchResults, result)
-
-						if isMatch {
-							fmt.Printf("   ✅ Potential match: Receiver[%s] <-> Sender[%s] (Hamming: %d, Score: %.3f)\n",
-								receiverRecord.ID, senderID, hammingDist, matchScore)
-						}
-					}
-				}
-			}
-
-			// Filter for actual matches
-			actualMatches := make([]*match.MatchResult, 0)
-			for _, result := range matchResults {
-				if result.IsMatch {
-					actualMatches = append(actualMatches, result)
-				}
-			}
-
-			fmt.Printf("📊 Matching summary:\n")
-			fmt.Printf("   Total comparisons: %d\n", len(matchResults))
-			fmt.Printf("   Matches found: %d\n", len(actualMatches))
-
-			// Prepare our matching data response
-			ourMatching := MatchingData{
-				Records: make(map[string]string),
-			}
-
-			for _, record := range records {
-				// Encode Bloom filter to base64
-				bloomData, err := pprl.BloomToBase64(record.BloomFilter)
-				if err != nil {
-					log.Printf("Failed to encode Bloom filter: %v", err)
-					continue
-				}
-				ourMatching.Records[record.ID] = bloomData
-			}
-
-			response := MatchingMessage{
-				Type:    "matching_response",
-				Payload: ourMatching,
-			}
-
-			if err := encoder.Encode(response); err != nil {
-				log.Printf("Failed to send matching response: %v", err)
-				return
-			}
-
-			// Send final results with actual matches
-			fmt.Printf("✅ Matching complete! Found %d matches out of %d comparisons\n",
-				len(actualMatches), len(matchResults))
-			for _, match := range actualMatches {
-				fmt.Printf("   Match: %s <-> %s (Score: %.3f, Hamming: %d, Jaccard: %.3f)\n",
-					match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.JaccardSimilarity)
-			}
-
-			// Create output directory if it doesn't exist
-			err := os.MkdirAll("out", 0755)
-			if err != nil {
-				log.Printf("Failed to create out directory: %v", err)
-			}
-
-			// Save results to CSV files in out/ directory
-			timestamp := time.Now().Format("20060102_150405")
-			matchesFile := fmt.Sprintf("out/matches_%s.csv", timestamp)
-			detailsFile := fmt.Sprintf("out/match_details_%s.csv", timestamp)
-
-			saveResultsToCSV(actualMatches, matchesFile)
-			saveMatchDetailsToCSV(actualMatches, detailsFile, csvDB, configFields)
-
-			results := &match.TwoPartyMatchResult{
-				MatchingBuckets: len(records), // All records compared
-				CandidatePairs:  len(matchResults),
-				TotalMatches:    len(actualMatches),
-				MatchResults:    matchResults,
-				Matches:         actualMatches,
-				Party1Records:   len(records),
-				Party2Records:   len(senderMatching.Records),
-			}
-
-			finalResponse := MatchingMessage{
-				Type:    "results",
-				Payload: results,
-			}
-
-			if err := encoder.Encode(finalResponse); err != nil {
-				log.Printf("Failed to send results: %v", err)
-				return
-			}
-
-			return // End connection after sending results
-
-		case "shutdown":
-			fmt.Println("🔴 Received shutdown signal")
-			return
+			// After matching, we can exit the loop
+			return nil
 
 		default:
-			log.Printf("Unknown message type: %s", msg.Type)
+			Warn("Unknown message type '%s' from connection %s", msg.Type, connID)
+			return fmt.Errorf("unknown message type: %s", msg.Type)
 		}
 	}
 }
 
-// saveResultsToCSV saves match results to a CSV file for easy viewing
+// handleBlockingRequest processes the blocking phase
+func handleBlockingRequest(encoder *json.Encoder, records []PatientRecord, connID string) error {
+	Info("Processing blocking request for connection %s", connID)
+
+	// Send back our blocking data
+	ourBlocking := BlockingData{
+		EncryptedBuckets: make(map[string][]string),
+		Signatures:       make(map[string]string),
+	}
+
+	// Simple bucketing for demo - in production this would use secure LSH
+	bucketCount := 0
+	for _, record := range records {
+		bucket := fmt.Sprintf("bucket_%s", record.ID[:1])
+		ourBlocking.EncryptedBuckets[bucket] = append(ourBlocking.EncryptedBuckets[bucket], record.ID)
+		bucketCount++
+	}
+
+	response := MatchingMessage{
+		Type:    "blocking_response",
+		Payload: ourBlocking,
+	}
+
+	if err := encoder.Encode(response); err != nil {
+		return fmt.Errorf("failed to send blocking response: %w", err)
+	}
+
+	Info("Sent blocking response with %d buckets for connection %s",
+		len(ourBlocking.EncryptedBuckets), connID)
+	return nil
+}
+
+// handleMatchingRequest processes the matching phase
+func handleMatchingRequest(encoder *json.Encoder, msg MatchingMessage, pprlRecords []*pprl.Record,
+	csvDB *db.CSVDatabase, cfg *config.Config, connID string) error {
+
+	Info("Processing matching request for connection %s", connID)
+
+	// Parse sender's matching data
+	payloadBytes, _ := json.Marshal(msg.Payload)
+	var senderMatching MatchingData
+	if err := json.Unmarshal(payloadBytes, &senderMatching); err != nil {
+		return fmt.Errorf("failed to parse sender matching data: %w", err)
+	}
+
+	Info("Comparing %d receiver records with %d sender records for connection %s",
+		len(pprlRecords), len(senderMatching.Records), connID)
+
+	// Perform fuzzy matching
+	startTime := time.Now()
+	matchResults := performFuzzyMatching(pprlRecords, senderMatching, connID)
+	matchDuration := time.Since(startTime)
+
+	Info("Fuzzy matching completed in %v, found %d matches for connection %s",
+		matchDuration, len(matchResults), connID)
+
+	// Send matching response
+	matchResponse := MatchingMessage{
+		Type:    "matching_response",
+		Payload: map[string]interface{}{"status": "complete"},
+	}
+
+	if err := encoder.Encode(matchResponse); err != nil {
+		return fmt.Errorf("failed to send matching response: %w", err)
+	}
+
+	// Prepare and send results
+	results := match.TwoPartyMatchResult{
+		Matches:         matchResults,
+		TotalMatches:    len(matchResults),
+		Party1Records:   len(pprlRecords),
+		Party2Records:   len(senderMatching.Records),
+		CandidatePairs:  len(pprlRecords) * len(senderMatching.Records),
+		MatchingBuckets: 1, // Simplified for demo
+	}
+
+	resultsMessage := MatchingMessage{
+		Type:    "results",
+		Payload: results,
+	}
+
+	if err := encoder.Encode(resultsMessage); err != nil {
+		return fmt.Errorf("failed to send results: %w", err)
+	}
+
+	// Save results to files
+	timestamp := time.Now().Format("20060102_150405")
+	if err := saveResults(matchResults, csvDB, cfg.Database.Fields, timestamp, connID); err != nil {
+		Warn("Failed to save results for connection %s: %v", connID, err)
+	}
+
+	Info("Results sent and saved for connection %s", connID)
+	return nil
+}
+
+// performFuzzyMatching implements the core matching algorithm
+func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingData, connID string) []*match.MatchResult {
+	var matchResults []*match.MatchResult
+
+	fuzzyConfig := &match.FuzzyMatchConfig{
+		HammingThreshold:  200, // Allow up to 200 bit differences
+		JaccardThreshold:  0.5, // Require at least 50% Jaccard similarity
+		UseSecureProtocol: false,
+	}
+
+	totalComparisons := 0
+	matchesFound := 0
+
+	for _, receiverRecord := range pprlRecords {
+		for senderID, senderBloomData := range senderMatching.Records {
+			totalComparisons++
+
+			// Decode Bloom filters for comparison
+			receiverBF, err := pprl.BloomFromBase64(receiverRecord.BloomData)
+			if err != nil {
+				Debug("Failed to decode receiver Bloom filter: %v", err)
+				continue
+			}
+
+			senderBF, err := pprl.BloomFromBase64(senderBloomData)
+			if err != nil {
+				Debug("Failed to decode sender Bloom filter: %v", err)
+				continue
+			}
+
+			// Calculate Hamming distance
+			hammingDist, err := receiverBF.HammingDistance(senderBF)
+			if err != nil {
+				Debug("Failed to calculate Hamming distance: %v", err)
+				continue
+			}
+
+			// Calculate Jaccard similarity for scoring (simple approximation)
+			// For Bloom filters, we'll use a simple approximation based on Hamming distance
+			maxBits := float64(receiverBF.GetSize())
+			jaccard := 1.0 - (float64(hammingDist) / maxBits)
+
+			// Determine if this is a match
+			isMatch := hammingDist <= fuzzyConfig.HammingThreshold
+
+			// Create match result
+			matchResult := &match.MatchResult{
+				ID1:             receiverRecord.ID,
+				ID2:             senderID,
+				MatchScore:      jaccard,
+				HammingDistance: hammingDist,
+				IsMatch:         isMatch,
+			}
+
+			matchResults = append(matchResults, matchResult)
+
+			if isMatch {
+				matchesFound++
+				Debug("Match found: %s <-> %s (Hamming: %d, Jaccard: %.3f)",
+					receiverRecord.ID, senderID, hammingDist, jaccard)
+			}
+		}
+	}
+
+	Info("Completed %d comparisons, found %d matches for connection %s",
+		totalComparisons, matchesFound, connID)
+
+	return matchResults
+}
+
+// saveResults saves matching results to CSV files
+func saveResults(matches []*match.MatchResult, csvDB *db.CSVDatabase, fields []string, timestamp, connID string) error {
+	// Save basic results
+	basicFilename := fmt.Sprintf("out/matches_%s_%s.csv", timestamp, connID)
+	saveResultsToCSV(matches, basicFilename)
+
+	// Save detailed results with patient data (only if csvDB is available)
+	if csvDB != nil {
+		detailFilename := fmt.Sprintf("out/match_details_%s_%s.csv", timestamp, connID)
+		saveMatchDetailsToCSV(matches, detailFilename, csvDB, fields)
+		Info("Results saved to %s and %s", basicFilename, detailFilename)
+	} else {
+		Info("Results saved to %s (detailed results not available for tokenized data)", basicFilename)
+	}
+
+	return nil
+}
+
+// saveResultsToCSV saves basic match results
 func saveResultsToCSV(matches []*match.MatchResult, filename string) {
+	// Ensure output directory exists
+	if err := EnsureOutputDirectory(); err != nil {
+		Error("Failed to ensure output directory: %v", err)
+		return
+	}
+
 	file, err := os.Create(filename)
 	if err != nil {
-		log.Printf("Failed to create results file %s: %v", filename, err)
+		Error("Failed to create results file %s: %v", filename, err)
 		return
 	}
 	defer file.Close()
 
 	// Write CSV header
-	file.WriteString("Receiver_ID,Sender_ID,Match_Score,Hamming_Distance,Jaccard_Similarity,Is_Match\n")
+	file.WriteString("Receiver_ID,Sender_ID,Match_Score,Hamming_Distance,Is_Match\n")
 
-	// Write match data
+	// Write match results
 	for _, match := range matches {
-		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d,%.3f,%t\n",
-			match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.JaccardSimilarity, match.IsMatch))
+		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d,%t\n",
+			match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch))
 	}
 
-	fmt.Printf("💾 Match results saved to: %s\n", filename)
+	Info("Basic results saved to: %s with %d records", filename, len(matches))
 }
 
-// saveMatchDetailsToCSV saves match details with patient demographics for debugging
+// saveMatchDetailsToCSV saves detailed match results with patient demographics
 func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB *db.CSVDatabase, fields []string) {
 	file, err := os.Create(filename)
 	if err != nil {
-		log.Printf("Failed to create match details file %s: %v", filename, err)
+		Error("Failed to create match details file %s: %v", filename, err)
 		return
 	}
 	defer file.Close()
@@ -363,7 +547,7 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 	// Get all receiver records from CSV
 	allReceiverRecords, err := csvDB.List(0, 1000000)
 	if err != nil {
-		log.Printf("Failed to get receiver records: %v", err)
+		Error("Failed to get receiver records: %v", err)
 		return
 	}
 
@@ -403,5 +587,5 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 		}
 	}
 
-	fmt.Printf("💾 Match details saved to: %s\n", filename)
+	Info("Match details saved to: %s", filename)
 }

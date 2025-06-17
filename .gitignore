@@ -6,8 +6,7 @@
 out/
 
 # Test outputs and temporary files
-test_output/
-receiver_output.txt
+logs/
 *.log
 
 # Data directories (actual data should not be committed)

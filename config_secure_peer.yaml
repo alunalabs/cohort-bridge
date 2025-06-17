@@ -1,0 +1,49 @@
+# Enhanced CohortBridge Configuration for Peer (Party B)
+# Mirror configuration with swapped ports and different data file
+
+database:
+  type: csv
+  filename: data/patients_b_tiny.csv  # Different data file for peer
+  fields:
+    - FIRST      # Updated to match CSV column names
+    - LAST       # Updated to match CSV column names
+    - BIRTHDATE  # Updated to match CSV column names
+    - ZIP        # Matches existing column name
+  random_bits_percent: 0.0  # Percentage of random bits to add to Bloom filters (0.0-1.0)
+
+peer:
+  host: 127.0.0.1  # IP address of the peer
+  port: 8082       # Port of the peer (swapped from main config)
+
+# Security configuration for network access control
+security:
+  allowed_ips:           # Whitelist of allowed IP addresses
+    - "127.0.0.1"        # localhost IPv4
+    - "::1"              # localhost IPv6
+    - "192.168.1.100"    # Example: specific trusted IP
+  require_ip_check: true # Whether to enforce IP whitelist (set false to disable)
+  max_connections: 5     # Maximum concurrent connections
+  rate_limit_per_min: 10 # Maximum connection attempts per minute per IP
+
+# Timeout configuration for network operations
+timeouts:
+  connection_timeout: 30s  # Time to wait for connection establishment
+  read_timeout: 120s       # Time to wait for reading data
+  write_timeout: 120s      # Time to wait for writing data
+  idle_timeout: 300s       # Maximum idle time before closing connection (5 minutes)
+  handshake_timeout: 45s   # Time to wait for protocol handshake
+
+# Logging configuration for monitoring and security
+logging:
+  level: info              # Log level: debug, info, warn, error
+  file: logs/cohort_peer.log    # Different log file for peer
+  max_size: 100            # Maximum log file size in MB
+  max_backups: 3           # Maximum number of old log files to keep
+  max_age: 30              # Maximum age of log files in days
+  enable_syslog: false     # Enable syslog output (disabled for Windows compatibility)
+  enable_audit: true       # Enable security audit logging
+  audit_file: logs/audit_peer.log # Different audit log for peer
+
+listen_port: 8081        # Port to listen on (swapped from main config)
+private_key: a4bb062b86e1b17e4f7eb426fa7a9c90e13fcabc0c6c9d0c5c0dd23ad58d47a8  # Different private key
+public_key: ""           # Will be derived from private key automatically 

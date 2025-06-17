@@ -110,28 +110,6 @@ func (s *Storage) WriteAll(records []*Record) error {
 	return nil
 }
 
-// Helper: Serialize a BloomFilter into base64 (for Record.BloomData).
-func BloomToBase64(bf *BloomFilter) (string, error) {
-	bytes, err := bf.MarshalBinary()
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(bytes), nil
-}
-
-// Helper: Deserialize a BloomFilter from base64 string.
-func BloomFromBase64(encoded string) (*BloomFilter, error) {
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, err
-	}
-	bf := &BloomFilter{}
-	if err := bf.UnmarshalBinary(raw); err != nil {
-		return nil, err
-	}
-	return bf, nil
-}
-
 // Helper: Serialize a QGramSet into base64 (for Record.QGramData).
 func QGramToBase64(qs *QGramSet) (string, error) {
 	// Convert QGramSet to a simple map for serialization

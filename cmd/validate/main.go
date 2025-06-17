@@ -21,6 +21,11 @@ func main() {
 	fmt.Println("===============================")
 	fmt.Println("This script runs the complete matching pipeline and validates results against ground truth.")
 
+	// Ensure output directory exists
+	if err := os.MkdirAll("out", 0755); err != nil {
+		log.Fatalf("Failed to create output directory: %v", err)
+	}
+
 	// Get validation parameters
 	params, err := getValidationParameters()
 	if err != nil {
@@ -46,28 +51,47 @@ func main() {
 
 	fmt.Printf("📊 Loaded %d ground truth matches\n", len(groundTruth))
 
-	// Load datasets
-	fmt.Println("📋 Loading datasets...")
+	// Load datasets and process
+	fmt.Printf("📂 Loading datasets...\n")
 
-	csvDB1, err := db.NewCSVDatabase(cfg1.Database.Filename)
-	if err != nil {
-		log.Fatalf("Failed to load dataset 1: %v", err)
+	// Load dataset 1 (support both tokenized and raw data)
+	var records1 []server.PatientRecord
+	if cfg1.Database.IsTokenized {
+		fmt.Printf("  Dataset 1: Loading tokenized data from %s\n", cfg1.Database.TokenizedFile)
+		records1, err = server.LoadTokenizedRecords(cfg1.Database.TokenizedFile)
+		if err != nil {
+			log.Fatalf("Failed to load tokenized dataset 1: %v", err)
+		}
+	} else {
+		fmt.Printf("  Dataset 1: Loading raw data from %s\n", cfg1.Database.Filename)
+		csvDB1, err := db.NewCSVDatabase(cfg1.Database.Filename)
+		if err != nil {
+			log.Fatalf("Failed to load dataset 1: %v", err)
+		}
+		records1, err = server.LoadPatientRecordsUtilWithRandomBits(csvDB1, cfg1.Database.Fields, params.RandomBitsPercent)
+		if err != nil {
+			log.Fatalf("Failed to convert dataset 1: %v", err)
+		}
 	}
 
-	csvDB2, err := db.NewCSVDatabase(cfg2.Database.Filename)
-	if err != nil {
-		log.Fatalf("Failed to load dataset 2: %v", err)
-	}
-
-	// Convert to patient records
-	records1, err := server.LoadPatientRecordsUtilWithRandomBits(csvDB1, cfg1.Database.Fields, params.RandomBitsPercent)
-	if err != nil {
-		log.Fatalf("Failed to convert dataset 1: %v", err)
-	}
-
-	records2, err := server.LoadPatientRecordsUtilWithRandomBits(csvDB2, cfg2.Database.Fields, params.RandomBitsPercent)
-	if err != nil {
-		log.Fatalf("Failed to convert dataset 2: %v", err)
+	// Load dataset 2 (support both tokenized and raw data)
+	var records2 []server.PatientRecord
+	if cfg2.Database.IsTokenized {
+		fmt.Printf("  Dataset 2: Loading tokenized data from %s\n", cfg2.Database.TokenizedFile)
+		records2, err = server.LoadTokenizedRecords(cfg2.Database.TokenizedFile)
+		if err != nil {
+			log.Fatalf("Failed to load tokenized dataset 2: %v", err)
+		}
+	} else {
+		fmt.Printf("  Dataset 2: Loading raw data from %s\n", cfg2.Database.Filename)
+		csvDB2, err := db.NewCSVDatabase(cfg2.Database.Filename)
+		if err != nil {
+			log.Fatalf("Failed to load dataset 2: %v", err)
+		}
+		records2, err = server.LoadPatientRecordsUtilWithRandomBits(csvDB2, cfg2.Database.Fields, params.RandomBitsPercent)
+		if err != nil {
+			log.Fatalf("Failed to convert dataset 2: %v", err)
+		}
 	}
 
 	fmt.Printf("✅ Dataset 1: %d records\n", len(records1))
@@ -123,7 +147,7 @@ func getValidationParameters() (*ValidationParameters, error) {
 		if len(args) >= 4 {
 			params.OutputPath = args[3]
 		} else {
-			params.OutputPath = "validation_results.csv"
+			params.OutputPath = "out/validation_results.csv"
 		}
 
 		// Optional candidate threshold (default if not provided)

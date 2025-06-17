@@ -1,0 +1,49 @@
+# Enhanced CohortBridge Configuration with Security, Timeouts, and Logging
+# This configuration demonstrates all available security and reliability features
+
+database:
+  type: csv
+  filename: data/patients_a_tiny.csv  # Update to match your actual data files
+  fields:
+    - FIRST      # Updated to match CSV column names
+    - LAST       # Updated to match CSV column names
+    - BIRTHDATE  # Updated to match CSV column names
+    - ZIP        # Matches existing column name
+  random_bits_percent: 0.0  # Percentage of random bits to add to Bloom filters (0.0-1.0)
+
+peer:
+  host: 127.0.0.1  # IP address of the peer (receiver for sender, sender for receiver)
+  port: 8081       # Port of the peer
+
+# Security configuration for network access control
+security:
+  allowed_ips:           # Whitelist of allowed IP addresses
+    - "127.0.0.1"        # localhost IPv4
+    - "::1"              # localhost IPv6
+    - "192.168.1.100"    # Example: specific trusted IP
+  require_ip_check: true # Whether to enforce IP whitelist (set false to disable)
+  max_connections: 5     # Maximum concurrent connections
+  rate_limit_per_min: 10 # Maximum connection attempts per minute per IP
+
+# Timeout configuration for network operations
+timeouts:
+  connection_timeout: 30s  # Time to wait for connection establishment
+  read_timeout: 120s       # Time to wait for reading data
+  write_timeout: 120s      # Time to wait for writing data
+  idle_timeout: 300s       # Maximum idle time before closing connection (5 minutes)
+  handshake_timeout: 45s   # Time to wait for protocol handshake
+
+# Logging configuration for monitoring and security
+logging:
+  level: info              # Log level: debug, info, warn, error
+  file: logs/cohort.log    # Log file path (empty for stdout only)
+  max_size: 100            # Maximum log file size in MB
+  max_backups: 3           # Maximum number of old log files to keep
+  max_age: 30              # Maximum age of log files in days
+  enable_syslog: false     # Enable syslog output (disabled for Windows compatibility)
+  enable_audit: true       # Enable security audit logging
+  audit_file: logs/audit.log # Audit log file path
+
+listen_port: 8082        # Port to listen on for incoming connections
+private_key: 240c1878d85eebe9d8a80cb7fadda30c854a7a72797c441bd1c547b10ac754b5  # Generated private key
+public_key: ""           # Will be derived from private key automatically 
