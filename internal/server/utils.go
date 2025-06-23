@@ -1,7 +1,9 @@
 package server
 
 import (
+	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -20,9 +22,76 @@ var (
 func GetGlobalMinHash() (*pprl.MinHash, error) {
 	var err error
 	globalMinHashOnce.Do(func() {
-		globalMinHashInstance, err = pprl.NewMinHash(1000, 128) // m=1000 (same as BF), s=128 hash functions
+		// Create deterministic MinHash by manually creating one with fixed parameters
+		globalMinHashInstance, err = createDeterministicMinHash(1000, 128)
 	})
 	return globalMinHashInstance, err
+}
+
+// createDeterministicMinHash creates a MinHash with deterministic parameters using a fixed seed
+func createDeterministicMinHash(m, s uint32) (*pprl.MinHash, error) {
+	if m == 0 || s == 0 {
+		return nil, fmt.Errorf("invalid parameters: m=%d, s=%d", m, s)
+	}
+
+	// Use the same prime as the original implementation
+	const prime uint32 = 2147483647 // Mersenne prime (2^31 - 1)
+	if m >= prime {
+		return nil, fmt.Errorf("m too large for chosen prime")
+	}
+
+	// Use a fixed seed for deterministic results
+	rng := rand.New(rand.NewSource(42)) // Fixed seed = 42
+
+	a := make([]uint32, s)
+	b := make([]uint32, s)
+
+	// Generate deterministic coefficients using the seeded RNG
+	for i := uint32(0); i < s; i++ {
+		a[i] = uint32(rng.Int31n(int32(prime-1))) + 1 // [1..prime-1]
+		b[i] = uint32(rng.Int31n(int32(prime)))       // [0..prime-1]
+	}
+
+	// Create binary data with our deterministic parameters using proper encoding
+	bufSize := 4 + int(s)*4 + int(s)*4 + 4 + int(s)*4
+	buf := make([]byte, bufSize)
+
+	offset := 0
+
+	// Write s
+	binary.LittleEndian.PutUint32(buf[offset:offset+4], s)
+	offset += 4
+
+	// Write a array
+	for i := uint32(0); i < s; i++ {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], a[i])
+		offset += 4
+	}
+
+	// Write b array
+	for i := uint32(0); i < s; i++ {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], b[i])
+		offset += 4
+	}
+
+	// Write prime
+	binary.LittleEndian.PutUint32(buf[offset:offset+4], prime)
+	offset += 4
+
+	// Write signature array (all prime values initially)
+	for i := uint32(0); i < s; i++ {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], prime)
+		offset += 4
+	}
+
+	// Create new MinHash and unmarshal our deterministic data
+	deterministicMH := &pprl.MinHash{}
+	err := deterministicMH.UnmarshalBinary(buf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal deterministic MinHash: %v", err)
+	}
+
+	return deterministicMH, nil
 }
 
 // EnsureOutputDirectory creates the output directory if it doesn't exist

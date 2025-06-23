@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -25,6 +28,9 @@ type TokenizedRecord struct {
 type TokenizationConfig struct {
 	InputFile           string   `json:"input_file"`
 	OutputFile          string   `json:"output_file"`
+	InputFormat         string   `json:"input_format"`
+	OutputFormat        string   `json:"output_format"`
+	BatchSize           int      `json:"batch_size"`
 	Fields              []string `json:"fields"`
 	BloomFilterSize     uint32   `json:"bloom_filter_size"`
 	BloomHashCount      uint32   `json:"bloom_hash_count"`
@@ -32,6 +38,203 @@ type TokenizationConfig struct {
 	MinHashPermutations uint32   `json:"minhash_permutations"`
 	RandomBitsPercent   float64  `json:"random_bits_percent"`
 	QGramLength         int      `json:"qgram_length"`
+	UseDatabase         bool     `json:"use_database"`
+	DatabaseConfig      string   `json:"database_config"`
+}
+
+// RecordReader interface for streaming input
+type RecordReader interface {
+	Read() (map[string]string, error)
+	Close() error
+}
+
+// RecordWriter interface for streaming output
+type RecordWriter interface {
+	Write(record TokenizedRecord) error
+	Close() error
+}
+
+// CSV Reader implementation
+type CSVRecordReader struct {
+	file    *os.File
+	reader  *csv.Reader
+	headers []string
+}
+
+func (r *CSVRecordReader) Read() (map[string]string, error) {
+	record, err := r.reader.Read()
+	if err != nil {
+		if err == io.EOF {
+			return nil, errors.New("EOF")
+		}
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for i, value := range record {
+		if i < len(r.headers) {
+			result[r.headers[i]] = value
+		}
+	}
+	return result, nil
+}
+
+func (r *CSVRecordReader) Close() error {
+	if r.file != nil {
+		return r.file.Close()
+	}
+	return nil
+}
+
+// JSON Reader implementation
+type JSONRecordReader struct {
+	file    *os.File
+	scanner *bufio.Scanner
+}
+
+func (r *JSONRecordReader) Read() (map[string]string, error) {
+	if !r.scanner.Scan() {
+		if r.scanner.Err() != nil {
+			return nil, r.scanner.Err()
+		}
+		return nil, errors.New("EOF")
+	}
+
+	var record map[string]interface{}
+	if err := json.Unmarshal(r.scanner.Bytes(), &record); err != nil {
+		return nil, err
+	}
+
+	// Convert all values to strings
+	result := make(map[string]string)
+	for k, v := range record {
+		if v != nil {
+			result[k] = fmt.Sprintf("%v", v)
+		}
+	}
+	return result, nil
+}
+
+func (r *JSONRecordReader) Close() error {
+	if r.file != nil {
+		return r.file.Close()
+	}
+	return nil
+}
+
+// Database Reader implementation
+type DatabaseRecordReader struct {
+	database  db.Database
+	offset    int
+	batchSize int
+	records   []map[string]string
+	index     int
+}
+
+func (r *DatabaseRecordReader) Read() (map[string]string, error) {
+	// If we've consumed all records in current batch, fetch next batch
+	if r.index >= len(r.records) {
+		var err error
+		r.records, err = r.database.List(r.offset, r.batchSize)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(r.records) == 0 {
+			return nil, errors.New("EOF")
+		}
+
+		r.offset += len(r.records)
+		r.index = 0
+	}
+
+	record := r.records[r.index]
+	r.index++
+	return record, nil
+}
+
+func (r *DatabaseRecordReader) Close() error {
+	return nil
+}
+
+// JSON Writer implementation
+type JSONRecordWriter struct {
+	file  *os.File
+	first bool
+}
+
+func (w *JSONRecordWriter) Write(record TokenizedRecord) error {
+	if w.first {
+		if _, err := w.file.WriteString("[\n"); err != nil {
+			return err
+		}
+		w.first = false
+	} else {
+		if _, err := w.file.WriteString(",\n"); err != nil {
+			return err
+		}
+	}
+
+	data, err := json.MarshalIndent(record, "  ", "  ")
+	if err != nil {
+		return err
+	}
+
+	_, err = w.file.Write(data)
+	return err
+}
+
+func (w *JSONRecordWriter) Close() error {
+	if !w.first {
+		if _, err := w.file.WriteString("\n]\n"); err != nil {
+			return err
+		}
+	} else {
+		// Empty array case
+		if _, err := w.file.WriteString("[]\n"); err != nil {
+			return err
+		}
+	}
+
+	if w.file != nil {
+		return w.file.Close()
+	}
+	return nil
+}
+
+// CSV Writer implementation
+type CSVRecordWriter struct {
+	file    *os.File
+	writer  *csv.Writer
+	headers []string
+	first   bool
+}
+
+func (w *CSVRecordWriter) Write(record TokenizedRecord) error {
+	if w.first {
+		w.headers = []string{"id", "bloom_filter", "minhash", "timestamp"}
+		if err := w.writer.Write(w.headers); err != nil {
+			return err
+		}
+		w.first = false
+	}
+
+	row := []string{record.ID, record.BloomFilter, record.MinHash, record.Timestamp}
+	return w.writer.Write(row)
+}
+
+func (w *CSVRecordWriter) Close() error {
+	if w.writer != nil {
+		w.writer.Flush()
+		if err := w.writer.Error(); err != nil {
+			return err
+		}
+	}
+
+	if w.file != nil {
+		return w.file.Close()
+	}
+	return nil
 }
 
 func main() {
@@ -43,9 +246,13 @@ func main() {
 	var (
 		configFile     = flag.String("config", "", "Configuration file (optional)")
 		mainConfigFile = flag.String("main-config", "config.yaml", "Main config file to read field names from")
-		inputFile      = flag.String("input", "", "Input CSV file with PHI data")
+		inputFile      = flag.String("input", "", "Input file with PHI data")
 		outputFile     = flag.String("output", "", "Output file for tokenized data")
+		inputFormat    = flag.String("input-format", "", "Input format: csv, json, postgres (auto-detect if not specified)")
+		outputFormat   = flag.String("output-format", "", "Output format: csv, json (auto-detect from extension if not specified)")
+		batchSize      = flag.Int("batch-size", 1000, "Number of records to process in each batch")
 		interactive    = flag.Bool("interactive", false, "Use interactive mode")
+		useDatabase    = flag.Bool("database", false, "Use database from main config instead of file")
 	)
 	flag.Parse()
 
@@ -78,11 +285,32 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to load config: %v", err)
 		}
-	} else if *interactive || (*inputFile == "" && *outputFile == "") {
+	} else if *interactive || (*inputFile == "" && *outputFile == "" && !*useDatabase) {
 		// Interactive mode
-		tokConfig, err = getInteractiveConfig(defaultFields)
+		tokConfig, err = getInteractiveConfig(defaultFields, *useDatabase)
 		if err != nil {
 			log.Fatalf("Interactive configuration failed: %v", err)
+		}
+	} else if *useDatabase {
+		// Database mode
+		if *outputFile == "" {
+			*outputFile = "out/tokens.json"
+		}
+		tokConfig = &TokenizationConfig{
+			InputFile:           "",
+			OutputFile:          *outputFile,
+			InputFormat:         "postgres",
+			OutputFormat:        detectOutputFormat(*outputFile, *outputFormat),
+			BatchSize:           *batchSize,
+			Fields:              defaultFields,
+			BloomFilterSize:     1000,
+			BloomHashCount:      5,
+			MinHashSignatures:   128,
+			MinHashPermutations: 1000,
+			RandomBitsPercent:   0.0,
+			QGramLength:         2,
+			UseDatabase:         true,
+			DatabaseConfig:      *mainConfigFile,
 		}
 	} else {
 		// Command line mode
@@ -92,11 +320,15 @@ func main() {
 			fmt.Println("  tokenize -input data.csv -output tokens.json -main-config config.yaml")
 			fmt.Println("  tokenize -config tokenize_config.yaml")
 			fmt.Println("  tokenize -interactive")
+			fmt.Println("  tokenize -database -main-config postgres_a.yaml -output tokens.json")
 			os.Exit(1)
 		}
 		tokConfig = &TokenizationConfig{
 			InputFile:           *inputFile,
 			OutputFile:          *outputFile,
+			InputFormat:         detectInputFormat(*inputFile, *inputFormat),
+			OutputFormat:        detectOutputFormat(*outputFile, *outputFormat),
+			BatchSize:           *batchSize,
 			Fields:              defaultFields,
 			BloomFilterSize:     1000,
 			BloomHashCount:      5,
@@ -104,12 +336,21 @@ func main() {
 			MinHashPermutations: 1000,
 			RandomBitsPercent:   0.0,
 			QGramLength:         2,
+			UseDatabase:         false,
+			DatabaseConfig:      "",
 		}
 	}
 
 	fmt.Printf("📋 Tokenization Configuration:\n")
-	fmt.Printf("  Input File: %s\n", tokConfig.InputFile)
+	if tokConfig.UseDatabase {
+		fmt.Printf("  Database Config: %s\n", tokConfig.DatabaseConfig)
+	} else {
+		fmt.Printf("  Input File: %s\n", tokConfig.InputFile)
+	}
 	fmt.Printf("  Output File: %s\n", tokConfig.OutputFile)
+	fmt.Printf("  Input Format: %s\n", tokConfig.InputFormat)
+	fmt.Printf("  Output Format: %s\n", tokConfig.OutputFormat)
+	fmt.Printf("  Batch Size: %d\n", tokConfig.BatchSize)
 	fmt.Printf("  Fields: %v\n", tokConfig.Fields)
 	fmt.Printf("  Bloom Filter Size: %d bits\n", tokConfig.BloomFilterSize)
 	fmt.Printf("  Hash Functions: %d\n", tokConfig.BloomHashCount)
@@ -129,117 +370,143 @@ func main() {
 	fmt.Printf("📁 Tokenized data saved to: %s\n", tokConfig.OutputFile)
 }
 
-func loadTokenizationConfig(filename string) (*TokenizationConfig, error) {
-	// For now, create a default config and save it as an example
-	// Later this could load from YAML/JSON
-	config := &TokenizationConfig{
-		InputFile:           "data/patients.csv",
-		OutputFile:          "out/tokens.json",
-		Fields:              []string{"FIRST", "LAST", "BIRTHDATE", "ZIP"},
-		BloomFilterSize:     1000,
-		BloomHashCount:      5,
-		MinHashSignatures:   128,
-		MinHashPermutations: 1000,
-		RandomBitsPercent:   0.0,
-		QGramLength:         2,
+// detectInputFormat determines input format from file extension or explicit format
+func detectInputFormat(filename, explicitFormat string) string {
+	if explicitFormat != "" {
+		return explicitFormat
 	}
 
-	// Save example config
-	exampleFile := strings.Replace(filename, ".yaml", "_example.json", 1)
-	if file, err := os.Create(exampleFile); err == nil {
-		defer file.Close()
-		encoder := json.NewEncoder(file)
-		encoder.SetIndent("", "  ")
-		encoder.Encode(config)
-		fmt.Printf("💡 Example config saved to: %s\n", exampleFile)
+	if strings.HasSuffix(strings.ToLower(filename), ".json") {
+		return "json"
 	}
-
-	return config, nil
+	return "csv" // default
 }
 
-func getInteractiveConfig(defaultFields []string) (*TokenizationConfig, error) {
-	config := &TokenizationConfig{}
-
-	fmt.Print("📁 Input CSV file path: ")
-	fmt.Scanln(&config.InputFile)
-
-	fmt.Print("📁 Output file path (default: out/tokens.json): ")
-	var output string
-	fmt.Scanln(&output)
-	if output == "" {
-		config.OutputFile = "out/tokens.json"
-	} else {
-		config.OutputFile = output
+// detectOutputFormat determines output format from file extension or explicit format
+func detectOutputFormat(filename, explicitFormat string) string {
+	if explicitFormat != "" {
+		return explicitFormat
 	}
 
-	fmt.Printf("📝 Fields to tokenize (comma-separated, default: %s): ", strings.Join(defaultFields, ","))
-	var fieldsStr string
-	fmt.Scanln(&fieldsStr)
-	if fieldsStr == "" {
-		config.Fields = defaultFields
-	} else {
-		config.Fields = strings.Split(fieldsStr, ",")
-		for i, field := range config.Fields {
-			config.Fields[i] = strings.TrimSpace(field)
-		}
+	if strings.HasSuffix(strings.ToLower(filename), ".json") {
+		return "json"
 	}
-
-	// Set reasonable defaults
-	config.BloomFilterSize = 1000
-	config.BloomHashCount = 5
-	config.MinHashSignatures = 128
-	config.MinHashPermutations = 1000
-	config.RandomBitsPercent = 0.0
-	config.QGramLength = 2
-
-	return config, nil
+	return "csv" // default
 }
 
-func performTokenization(config *TokenizationConfig) error {
-	// Load CSV data
-	fmt.Printf("📖 Loading CSV data from: %s\n", config.InputFile)
-	csvDB, err := db.NewCSVDatabase(config.InputFile)
-	if err != nil {
-		return fmt.Errorf("failed to load CSV: %w", err)
-	}
-
-	// Get all records
-	allRecords, err := csvDB.List(0, 1000000)
-	if err != nil {
-		return fmt.Errorf("failed to list records: %w", err)
-	}
-
-	fmt.Printf("📊 Processing %d records...\n", len(allRecords))
-
-	var tokenizedRecords []TokenizedRecord
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-
-	for i, record := range allRecords {
-		if i%100 == 0 {
-			fmt.Printf("  Progress: %d/%d records\n", i, len(allRecords))
+// createInputReader creates appropriate reader based on format
+func createInputReader(tokConfig *TokenizationConfig) (RecordReader, error) {
+	switch tokConfig.InputFormat {
+	case "csv":
+		file, err := os.Open(tokConfig.InputFile)
+		if err != nil {
+			return nil, err
 		}
 
+		reader := csv.NewReader(file)
+		headers, err := reader.Read()
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("failed to read CSV headers: %w", err)
+		}
+
+		return &CSVRecordReader{
+			file:    file,
+			reader:  reader,
+			headers: headers,
+		}, nil
+
+	case "json":
+		file, err := os.Open(tokConfig.InputFile)
+		if err != nil {
+			return nil, err
+		}
+
+		return &JSONRecordReader{
+			file:    file,
+			scanner: bufio.NewScanner(file),
+		}, nil
+
+	case "postgres":
+		cfg, err := config.Load(tokConfig.DatabaseConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load config: %w", err)
+		}
+
+		database, err := db.GetDatabaseFromConfig(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to database: %w", err)
+		}
+
+		fmt.Printf("✅ Connected to %s database\n", cfg.Database.Type)
+
+		return &DatabaseRecordReader{
+			database:  database,
+			batchSize: tokConfig.BatchSize,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported input format: %s", tokConfig.InputFormat)
+	}
+}
+
+// createOutputWriter creates appropriate writer based on format
+func createOutputWriter(tokConfig *TokenizationConfig) (RecordWriter, error) {
+	switch tokConfig.OutputFormat {
+	case "json":
+		file, err := os.Create(tokConfig.OutputFile)
+		if err != nil {
+			return nil, err
+		}
+
+		return &JSONRecordWriter{
+			file:  file,
+			first: true,
+		}, nil
+
+	case "csv":
+		file, err := os.Create(tokConfig.OutputFile)
+		if err != nil {
+			return nil, err
+		}
+
+		return &CSVRecordWriter{
+			file:   file,
+			writer: csv.NewWriter(file),
+			first:  true,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported output format: %s", tokConfig.OutputFormat)
+	}
+}
+
+// processBatch processes a batch of records and writes them to output
+func processBatch(batch []map[string]string, writer RecordWriter, tokConfig *TokenizationConfig, timestamp string, offset int) error {
+	fmt.Printf("  Processing batch: %d-%d records\n", offset+1, offset+len(batch))
+
+	for _, record := range batch {
 		// Create Bloom filter
 		bf := pprl.NewBloomFilterWithRandomBits(
-			config.BloomFilterSize,
-			config.BloomHashCount,
-			config.RandomBitsPercent,
+			tokConfig.BloomFilterSize,
+			tokConfig.BloomHashCount,
+			tokConfig.RandomBitsPercent,
 		)
 
 		// Create MinHash
-		mh, err := pprl.NewMinHash(config.MinHashPermutations, config.MinHashSignatures)
+		mh, err := pprl.NewMinHash(tokConfig.MinHashPermutations, tokConfig.MinHashSignatures)
 		if err != nil {
 			return fmt.Errorf("failed to create MinHash: %w", err)
 		}
 
 		// Process each configured field
-		for _, field := range config.Fields {
+		for _, field := range tokConfig.Fields {
 			if value, exists := record[field]; exists && value != "" {
 				// Normalize field value
 				normalized := normalizeField(value)
 
 				// Generate q-grams
-				qgrams := generateQGrams(normalized, config.QGramLength)
+				qgrams := generateQGrams(normalized, tokConfig.QGramLength)
 
 				// Add q-grams to Bloom filter
 				for _, qgram := range qgrams {
@@ -273,69 +540,161 @@ func performTokenization(config *TokenizationConfig) error {
 			Timestamp:   timestamp,
 		}
 
-		tokenizedRecords = append(tokenizedRecords, tokenized)
+		// Write to output
+		if err := writer.Write(tokenized); err != nil {
+			return fmt.Errorf("failed to write tokenized record: %w", err)
+		}
 	}
 
-	fmt.Printf("💾 Saving %d tokenized records...\n", len(tokenizedRecords))
+	return nil
+}
 
-	// Save to output file
-	if err := saveTokenizedRecords(tokenizedRecords, config.OutputFile); err != nil {
-		return fmt.Errorf("failed to save tokenized records: %w", err)
+func performTokenization(tokConfig *TokenizationConfig) error {
+	fmt.Printf("📖 Input format: %s, Output format: %s, Batch size: %d\n",
+		tokConfig.InputFormat, tokConfig.OutputFormat, tokConfig.BatchSize)
+
+	// Create input reader
+	reader, err := createInputReader(tokConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create input reader: %w", err)
+	}
+	defer reader.Close()
+
+	// Create output writer
+	writer, err := createOutputWriter(tokConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create output writer: %w", err)
+	}
+	defer writer.Close()
+
+	// Process records in batches
+	batch := make([]map[string]string, 0, tokConfig.BatchSize)
+	totalProcessed := 0
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	fmt.Printf("📊 Starting batch processing...\n")
+
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err.Error() == "EOF" {
+				// Process final batch
+				if len(batch) > 0 {
+					if err := processBatch(batch, writer, tokConfig, timestamp, totalProcessed); err != nil {
+						return err
+					}
+					totalProcessed += len(batch)
+				}
+				break
+			}
+			return fmt.Errorf("failed to read record: %w", err)
+		}
+
+		batch = append(batch, record)
+
+		// Process batch when it's full
+		if len(batch) >= tokConfig.BatchSize {
+			if err := processBatch(batch, writer, tokConfig, timestamp, totalProcessed); err != nil {
+				return err
+			}
+			totalProcessed += len(batch)
+			batch = batch[:0] // Reset batch
+		}
 	}
 
-	// Also save as CSV for compatibility
-	csvOutputFile := strings.Replace(config.OutputFile, ".json", ".csv", 1)
-	if err := saveTokenizedRecordsCSV(tokenizedRecords, csvOutputFile); err != nil {
-		fmt.Printf("⚠️  Warning: Failed to save CSV format: %v\n", err)
+	fmt.Printf("✅ Processed %d total records\n", totalProcessed)
+	return nil
+}
+
+func loadTokenizationConfig(filename string) (*TokenizationConfig, error) {
+	// For now, create a default config and save it as an example
+	// Later this could load from YAML/JSON
+	config := &TokenizationConfig{
+		InputFile:           "data/patients.csv",
+		OutputFile:          "out/tokens.json",
+		Fields:              []string{"FIRST", "LAST", "BIRTHDATE", "ZIP"},
+		BloomFilterSize:     1000,
+		BloomHashCount:      5,
+		MinHashSignatures:   128,
+		MinHashPermutations: 1000,
+		RandomBitsPercent:   0.0,
+		QGramLength:         2,
+	}
+
+	// Save example config
+	exampleFile := strings.Replace(filename, ".yaml", "_example.json", 1)
+	if file, err := os.Create(exampleFile); err == nil {
+		defer file.Close()
+		encoder := json.NewEncoder(file)
+		encoder.SetIndent("", "  ")
+		encoder.Encode(config)
+		fmt.Printf("💡 Example config saved to: %s\n", exampleFile)
+	}
+
+	return config, nil
+}
+
+func getInteractiveConfig(defaultFields []string, useDatabase bool) (*TokenizationConfig, error) {
+	config := &TokenizationConfig{
+		UseDatabase: useDatabase,
+	}
+
+	if !useDatabase {
+		fmt.Print("📁 Input file path: ")
+		fmt.Scanln(&config.InputFile)
+
+		fmt.Print("📝 Input format (csv/json, default: auto-detect): ")
+		var inputFmt string
+		fmt.Scanln(&inputFmt)
+		config.InputFormat = detectInputFormat(config.InputFile, inputFmt)
 	} else {
-		fmt.Printf("📁 Also saved as CSV: %s\n", csvOutputFile)
+		config.InputFormat = "postgres"
 	}
 
-	return nil
-}
-
-func saveTokenizedRecords(records []TokenizedRecord, filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(records)
-}
-
-func saveTokenizedRecordsCSV(records []TokenizedRecord, filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// Write header
-	header := []string{"id", "bloom_filter", "minhash", "timestamp"}
-	if err := writer.Write(header); err != nil {
-		return err
+	fmt.Print("📁 Output file path (default: out/tokens.json): ")
+	var output string
+	fmt.Scanln(&output)
+	if output == "" {
+		config.OutputFile = "out/tokens.json"
+	} else {
+		config.OutputFile = output
 	}
 
-	// Write records
-	for _, record := range records {
-		row := []string{
-			record.ID,
-			record.BloomFilter,
-			record.MinHash,
-			record.Timestamp,
-		}
-		if err := writer.Write(row); err != nil {
-			return err
+	fmt.Print("📝 Output format (csv/json, default: auto-detect): ")
+	var outputFmt string
+	fmt.Scanln(&outputFmt)
+	config.OutputFormat = detectOutputFormat(config.OutputFile, outputFmt)
+
+	fmt.Print("📊 Batch size (default: 1000): ")
+	var batchStr string
+	fmt.Scanln(&batchStr)
+	if batchStr == "" {
+		config.BatchSize = 1000
+	} else {
+		fmt.Sscanf(batchStr, "%d", &config.BatchSize)
+	}
+
+	fmt.Printf("📝 Fields to tokenize (comma-separated, default: %s): ", strings.Join(defaultFields, ","))
+	var fieldsStr string
+	fmt.Scanln(&fieldsStr)
+	if fieldsStr == "" {
+		config.Fields = defaultFields
+	} else {
+		config.Fields = strings.Split(fieldsStr, ",")
+		for i, field := range config.Fields {
+			config.Fields[i] = strings.TrimSpace(field)
 		}
 	}
 
-	return nil
+	// Set reasonable defaults
+	config.BloomFilterSize = 1000
+	config.BloomHashCount = 5
+	config.MinHashSignatures = 128
+	config.MinHashPermutations = 1000
+	config.RandomBitsPercent = 0.0
+	config.QGramLength = 2
+
+	return config, nil
 }
 
 func normalizeField(value string) string {

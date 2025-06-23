@@ -21,8 +21,8 @@ func GetDatabaseFromConfig(cfg *config.Config) (Database, error) {
 			return nil, fmt.Errorf("CSV filename not specified in config")
 		}
 		return NewCSVDatabase(csvPath)
-	// case "postgres", "postgresql":
-	// return NewPostgresDatabase(cfg.Database)
+	case "postgres", "postgresql":
+		return NewPostgresDatabase(cfg.Database)
 	// Add other database types here as needed
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", cfg.Database.Type)
