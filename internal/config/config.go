@@ -49,9 +49,19 @@ type Config struct {
 		EnableAudit  bool   `yaml:"enable_audit"`  // Enable audit logging for security events
 		AuditFile    string `yaml:"audit_file"`    // Audit log file path
 	} `yaml:"logging"`
-	ListenPort int    `yaml:"listen_port"`
-	PrivateKey string `yaml:"private_key"`
-	PublicKey  string `yaml:"public_key"`
+	Streaming  *StreamingConfig `yaml:"streaming,omitempty"` // Streaming configuration for large datasets
+	ListenPort int              `yaml:"listen_port"`
+	PrivateKey string           `yaml:"private_key"`
+	PublicKey  string           `yaml:"public_key"`
+}
+
+// StreamingConfig defines configuration for memory-efficient streaming operations
+type StreamingConfig struct {
+	Enabled           bool `yaml:"enabled"`             // Whether streaming mode is enabled
+	BatchSize         int  `yaml:"batch_size"`          // Number of records to process per batch
+	MaxMemoryMB       int  `yaml:"max_memory_mb"`       // Maximum memory usage in MB
+	EnableProgressLog bool `yaml:"enable_progress_log"` // Whether to log batch progress
+	WriteBufferSize   int  `yaml:"write_buffer_size"`   // Buffer size for writing results
 }
 
 // SetDefaults sets reasonable default values for new configuration fields
@@ -96,6 +106,20 @@ func (c *Config) SetDefaults() {
 	}
 	if c.Logging.MaxAge == 0 {
 		c.Logging.MaxAge = 30 // 30 days
+	}
+
+	// Streaming defaults (only set if streaming is enabled)
+	if c.Streaming != nil && c.Streaming.Enabled {
+		if c.Streaming.BatchSize == 0 {
+			c.Streaming.BatchSize = 1000 // 1000 records per batch
+		}
+		if c.Streaming.MaxMemoryMB == 0 {
+			c.Streaming.MaxMemoryMB = 256 // 256MB max memory
+		}
+		if c.Streaming.WriteBufferSize == 0 {
+			c.Streaming.WriteBufferSize = 100 // 100 results buffered
+		}
+		// EnableProgressLog defaults to false unless explicitly set
 	}
 }
 

@@ -294,7 +294,7 @@ func main() {
 	} else if *useDatabase {
 		// Database mode
 		if *outputFile == "" {
-			*outputFile = "out/tokens.json"
+			*outputFile = "out/tokens.csv"
 		}
 		tokConfig = &TokenizationConfig{
 			InputFile:           "",
@@ -316,11 +316,11 @@ func main() {
 		// Command line mode
 		if *inputFile == "" || *outputFile == "" {
 			fmt.Println("❌ Usage:")
-			fmt.Println("  tokenize -input data.csv -output tokens.json")
-			fmt.Println("  tokenize -input data.csv -output tokens.json -main-config config.yaml")
+			fmt.Println("  tokenize -input data.csv -output tokens.csv")
+			fmt.Println("  tokenize -input data.csv -output tokens.csv -main-config config.yaml")
 			fmt.Println("  tokenize -config tokenize_config.yaml")
 			fmt.Println("  tokenize -interactive")
-			fmt.Println("  tokenize -database -main-config postgres_a.yaml -output tokens.json")
+			fmt.Println("  tokenize -database -main-config postgres_a.yaml -output tokens.csv")
 			os.Exit(1)
 		}
 		tokConfig = &TokenizationConfig{

@@ -2,12 +2,17 @@ package server
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
+	"net"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
@@ -249,4 +254,192 @@ func generateQGrams(text string, q int) []string {
 	}
 
 	return qgrams
+}
+
+// LoadPatientRecordsStreamingBatches provides streaming access to patient records
+// This function is designed to work with the new streaming matching infrastructure
+func LoadPatientRecordsStreamingBatches(csvDB *db.CSVDatabase, fields []string, batchSize int, randomBitsPercent float64) (*StreamingRecordIterator, error) {
+	return NewStreamingRecordIterator(csvDB, fields, batchSize, randomBitsPercent)
+}
+
+// StreamingRecordIterator provides an iterator interface for large datasets
+type StreamingRecordIterator struct {
+	csvDB         *db.CSVDatabase
+	fields        []string
+	batchSize     int
+	randomBits    float64
+	currentBatch  []PatientRecord
+	offset        int
+	hasMore       bool
+	sharedMinHash *pprl.MinHash
+}
+
+// NewStreamingRecordIterator creates a new streaming record iterator
+func NewStreamingRecordIterator(csvDB *db.CSVDatabase, fields []string, batchSize int, randomBitsPercent float64) (*StreamingRecordIterator, error) {
+	// Get the GLOBAL shared MinHash instance
+	sharedMinHash, err := GetGlobalMinHash()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get global shared MinHash: %v", err)
+	}
+
+	return &StreamingRecordIterator{
+		csvDB:         csvDB,
+		fields:        fields,
+		batchSize:     batchSize,
+		randomBits:    randomBitsPercent,
+		offset:        0,
+		hasMore:       true,
+		sharedMinHash: sharedMinHash,
+	}, nil
+}
+
+// NextBatch returns the next batch of patient records
+func (iter *StreamingRecordIterator) NextBatch() ([]PatientRecord, error) {
+	if !iter.hasMore {
+		return nil, io.EOF
+	}
+
+	// Get raw records from database
+	rawRecords, err := iter.csvDB.List(iter.offset, iter.batchSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get records at offset %d: %v", iter.offset, err)
+	}
+
+	if len(rawRecords) == 0 {
+		iter.hasMore = false
+		return nil, io.EOF
+	}
+
+	// Convert to PatientRecord format
+	var records []PatientRecord
+	for _, record := range rawRecords {
+		// Create Bloom filter for this record
+		bf := pprl.NewBloomFilterWithRandomBits(1000, 5, iter.randomBits)
+
+		// Create MinHash instance with SAME parameters as shared instance
+		recordMinHash, err := recreateMinHashFromShared(iter.sharedMinHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create MinHash for record: %v", err)
+		}
+
+		// Add configured fields to Bloom filter using q-grams
+		for _, field := range iter.fields {
+			if value, exists := record[field]; exists && value != "" {
+				normalized := normalizeFieldUtil(value)
+				qgrams := generateQGrams(normalized, 2)
+
+				for _, qgram := range qgrams {
+					bf.Add([]byte(qgram))
+				}
+			}
+		}
+
+		// Compute MinHash signature
+		signature, err := recordMinHash.ComputeSignature(bf)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute MinHash signature: %v", err)
+		}
+
+		records = append(records, PatientRecord{
+			ID:               record["id"],
+			BloomFilter:      bf,
+			MinHash:          recordMinHash,
+			MinHashSignature: signature,
+		})
+	}
+
+	iter.offset += len(rawRecords)
+	iter.currentBatch = records
+
+	// Check if we got fewer records than requested (end of data)
+	if len(rawRecords) < iter.batchSize {
+		iter.hasMore = false
+	}
+
+	return records, nil
+}
+
+// HasMore returns true if there are more batches to process
+func (iter *StreamingRecordIterator) HasMore() bool {
+	return iter.hasMore
+}
+
+// GetCurrentOffset returns the current offset in the dataset
+func (iter *StreamingRecordIterator) GetCurrentOffset() int {
+	return iter.offset
+}
+
+// GetBatchSize returns the configured batch size
+func (iter *StreamingRecordIterator) GetBatchSize() int {
+	return iter.batchSize
+}
+
+// GetEstimatedTotalRecords attempts to estimate total records (may not be exact)
+func (iter *StreamingRecordIterator) GetEstimatedTotalRecords() (int, error) {
+	// Try to get a large sample to estimate total size
+	// This is a rough estimation and may not be perfect for all database types
+	sampleRecords, err := iter.csvDB.List(0, 100000) // Try to get up to 100k records
+	if err != nil {
+		return 0, fmt.Errorf("failed to estimate total records: %v", err)
+	}
+
+	// If we got fewer than requested, this is likely the total
+	if len(sampleRecords) < 100000 {
+		return len(sampleRecords), nil
+	}
+
+	// Otherwise, we know there are at least 100k records, but exact count is unknown
+	return len(sampleRecords), nil // Return what we know for now
+}
+
+// SendIntersectionData sends intersection results to a receiver
+func SendIntersectionData(cfg *config.Config, matchData *MatchingData) error {
+	target := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
+	Info("Sending intersection data to %s", target)
+
+	conn, err := net.DialTimeout("tcp", target, 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to receiver: %w", err)
+	}
+	defer conn.Close()
+
+	// Send a protocol header indicating intersection data
+	if _, err := conn.Write([]byte("INTERSECTION_DATA\n")); err != nil {
+		return fmt.Errorf("failed to send header: %w", err)
+	}
+
+	// Encode and send the intersection data
+	encoder := json.NewEncoder(conn)
+	if err := encoder.Encode(matchData); err != nil {
+		return fmt.Errorf("failed to send intersection data: %w", err)
+	}
+
+	Info("Successfully sent %d intersection matches", len(matchData.Records))
+	return nil
+}
+
+// SendMatchedRecords sends matched raw data records to a receiver
+func SendMatchedRecords(cfg *config.Config, matchedData []map[string]string) error {
+	target := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
+	Info("Sending matched records to %s", target)
+
+	conn, err := net.DialTimeout("tcp", target, 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to receiver: %w", err)
+	}
+	defer conn.Close()
+
+	// Send a protocol header indicating raw matched data
+	if _, err := conn.Write([]byte("MATCHED_DATA\n")); err != nil {
+		return fmt.Errorf("failed to send header: %w", err)
+	}
+
+	// Encode and send the matched data
+	encoder := json.NewEncoder(conn)
+	if err := encoder.Encode(matchedData); err != nil {
+		return fmt.Errorf("failed to send matched data: %w", err)
+	}
+
+	Info("Successfully sent %d matched records", len(matchedData))
+	return nil
 }

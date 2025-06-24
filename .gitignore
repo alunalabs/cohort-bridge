@@ -55,5 +55,9 @@ tmp/
 *.out
 *.err
 
+# Documentation files (except README.md)
+*.md
+!README.md
+
 # testing
 cmd/test

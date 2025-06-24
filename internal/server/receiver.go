@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -364,6 +365,17 @@ func handleMatchingRequest(encoder *json.Encoder, msg MatchingMessage, pprlRecor
 	Info("Comparing %d receiver records with %d sender records for connection %s",
 		len(pprlRecords), len(senderMatching.Records), connID)
 
+	// Determine if we should use streaming approach
+	useStreaming := shouldUseStreamingApproach(pprlRecords, senderMatching, cfg)
+
+	if useStreaming && csvDB != nil {
+		Info("Using streaming approach for large dataset matching (connection %s)", connID)
+		return handleStreamingMatchingRequest(encoder, msg, csvDB, cfg, connID)
+	}
+
+	// Fall back to original in-memory approach for smaller datasets or tokenized data
+	Info("Using in-memory approach for matching (connection %s)", connID)
+
 	// Perform fuzzy matching
 	startTime := time.Now()
 	matchResults := performFuzzyMatching(pprlRecords, senderMatching, connID)
@@ -409,6 +421,33 @@ func handleMatchingRequest(encoder *json.Encoder, msg MatchingMessage, pprlRecor
 
 	Info("Results sent and saved for connection %s", connID)
 	return nil
+}
+
+// shouldUseStreamingApproach determines whether to use streaming or in-memory matching
+func shouldUseStreamingApproach(pprlRecords []*pprl.Record, senderMatching MatchingData, cfg *config.Config) bool {
+	senderCount := len(senderMatching.Records)
+	receiverCount := len(pprlRecords)
+
+	// Calculate total comparisons
+	totalComparisons := senderCount * receiverCount
+
+	// Use streaming if:
+	// 1. Total comparisons > 1 million, OR
+	// 2. Either dataset > 5000 records, OR
+	// 3. Combined dataset size > 10000 records
+	if totalComparisons > 1000000 ||
+		senderCount > 5000 ||
+		receiverCount > 5000 ||
+		(senderCount+receiverCount) > 10000 {
+
+		Info("Recommending streaming approach: %d receiver records, %d sender records, %d total comparisons",
+			receiverCount, senderCount, totalComparisons)
+		return true
+	}
+
+	Info("Using in-memory approach: %d receiver records, %d sender records, %d total comparisons",
+		receiverCount, senderCount, totalComparisons)
+	return false
 }
 
 // performFuzzyMatching implements the core matching algorithm
@@ -589,4 +628,160 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 	}
 
 	Info("Match details saved to: %s", filename)
+}
+
+// performStreamingFuzzyMatching implements memory-efficient streaming matching
+func performStreamingFuzzyMatching(
+	csvDB *db.CSVDatabase,
+	fields []string,
+	senderMatching MatchingData,
+	cfg *config.Config,
+	connID string,
+) error {
+
+	Info("Starting streaming fuzzy matching for connection %s", connID)
+
+	// Create streaming configuration
+	streamConfig := &StreamingConfig{
+		BatchSize:         1000, // Process 1000 records at a time
+		MaxMemoryMB:       256,  // Limit memory usage to 256MB
+		EnableProgressLog: true,
+		WriteBufferSize:   100,
+		HammingThreshold:  200, // Same as original
+		JaccardThreshold:  0.5, // Same as original
+	}
+
+	// Check if we should use smaller batches for memory constraints
+	if len(senderMatching.Records) > 10000 {
+		streamConfig.BatchSize = 500 // Smaller batches for large sender datasets
+		Info("Using smaller batch size (%d) due to large sender dataset (%d records)",
+			streamConfig.BatchSize, len(senderMatching.Records))
+	}
+
+	timestamp := time.Now().Format("20060102_150405")
+
+	// Create streaming result writer
+	resultWriter, err := NewMatchResultWriter(timestamp, connID)
+	if err != nil {
+		return fmt.Errorf("failed to create result writer: %w", err)
+	}
+	defer resultWriter.Close()
+
+	// Create streaming matcher
+	matcher := NewStreamingMatcher(streamConfig, resultWriter)
+
+	// Create streaming record reader
+	dbInterface := db.Database(csvDB)
+	recordReader, err := NewStreamingRecordReader(&dbInterface, fields, streamConfig.BatchSize, 0.0)
+	if err != nil {
+		return fmt.Errorf("failed to create record reader: %w", err)
+	}
+
+	startTime := time.Now()
+	batchCount := 0
+
+	Info("Starting batch processing with batch size %d", streamConfig.BatchSize)
+
+	// Process records in batches
+	for {
+		batch, err := recordReader.ReadBatch()
+		if err != nil {
+			if err == io.EOF {
+				break // No more records
+			}
+			return fmt.Errorf("failed to read batch: %w", err)
+		}
+
+		batchCount++
+		Info("Processing batch %d with %d records (offset: %d)",
+			batchCount, batch.Size, batch.Offset)
+
+		// Match this batch against sender data
+		if err := matcher.MatchBatchAgainstSender(batch, senderMatching, connID); err != nil {
+			return fmt.Errorf("failed to match batch %d: %w", batchCount, err)
+		}
+
+		// Log memory usage periodically
+		if batchCount%10 == 0 {
+			totalComparisons, totalMatches := matcher.GetStats()
+			Info("Progress: %d batches processed, %d total comparisons, %d matches found",
+				batchCount, totalComparisons, totalMatches)
+		}
+	}
+
+	duration := time.Since(startTime)
+	totalComparisons, totalMatches := matcher.GetStats()
+
+	Info("Streaming matching completed for connection %s", connID)
+	Info("Total: %d batches, %d comparisons, %d matches in %v",
+		batchCount, totalComparisons, totalMatches, duration)
+	Info("Performance: %.2f comparisons/sec, %.2f matches/sec",
+		float64(totalComparisons)/duration.Seconds(),
+		float64(totalMatches)/duration.Seconds())
+
+	return nil
+}
+
+// handleStreamingMatchingRequest handles matching requests using streaming approach
+func handleStreamingMatchingRequest(encoder *json.Encoder, msg MatchingMessage, csvDB *db.CSVDatabase,
+	cfg *config.Config, connID string) error {
+
+	// Extract sender matching data
+	senderMatchingInterface, ok := msg.Payload.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid matching payload format")
+	}
+
+	recordsInterface, exists := senderMatchingInterface["records"]
+	if !exists {
+		return fmt.Errorf("no records found in matching payload")
+	}
+
+	recordsMap, ok := recordsInterface.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid records format in matching payload")
+	}
+
+	// Convert to MatchingData format
+	senderMatching := MatchingData{
+		Records: make(map[string]string),
+	}
+
+	for id, bloomData := range recordsMap {
+		if bloomStr, ok := bloomData.(string); ok {
+			senderMatching.Records[id] = bloomStr
+		}
+	}
+
+	Info("Received streaming matching request with %d sender records for connection %s",
+		len(senderMatching.Records), connID)
+
+	// Perform streaming matching
+	if err := performStreamingFuzzyMatching(csvDB, cfg.Database.Fields, senderMatching, cfg, connID); err != nil {
+		Error("Streaming matching failed for connection %s: %v", connID, err)
+
+		// Send error response
+		errorResponse := MatchingMessage{
+			Type:    "error",
+			Payload: map[string]string{"error": err.Error()},
+		}
+		return encoder.Encode(errorResponse)
+	}
+
+	// Send success response
+	successResponse := MatchingMessage{
+		Type: "results",
+		Payload: map[string]interface{}{
+			"status":    "completed",
+			"message":   "Streaming matching completed successfully",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		},
+	}
+
+	if err := encoder.Encode(successResponse); err != nil {
+		return fmt.Errorf("failed to send success response: %w", err)
+	}
+
+	Info("Streaming matching response sent for connection %s", connID)
+	return nil
 }
