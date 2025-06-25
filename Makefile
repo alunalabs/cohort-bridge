@@ -6,8 +6,8 @@ BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S_UTC')
 LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)"
 
 # Program definitions
-PROGRAMS=agent tokenize intersect send validate test
-PROGRAM_PATHS=./cmd/agent ./cmd/tokenize ./cmd/intersect ./cmd/send ./cmd/validate ./cmd/test
+PROGRAMS=cohort-bridge test
+PROGRAM_PATHS=./cmd/cohort-bridge ./cmd/test
 
 # Default target
 .PHONY: all
@@ -18,30 +18,10 @@ all: build
 build: $(PROGRAMS)
 
 # Build individual programs
-.PHONY: agent
-agent:
-	@echo "Building agent..."
-	go build $(LDFLAGS) -o agent ./cmd/agent
-
-.PHONY: tokenize
-tokenize:
-	@echo "Building tokenize..."
-	go build $(LDFLAGS) -o tokenize ./cmd/tokenize
-
-.PHONY: intersect
-intersect:
-	@echo "Building intersect..."
-	go build $(LDFLAGS) -o intersect ./cmd/intersect
-
-.PHONY: send
-send:
-	@echo "Building send..."
-	go build $(LDFLAGS) -o send ./cmd/send
-
-.PHONY: validate
-validate:
-	@echo "Building validate..."
-	go build $(LDFLAGS) -o validate ./cmd/validate
+.PHONY: cohort-bridge
+cohort-bridge:
+	@echo "Building cohort-bridge..."
+	go build $(LDFLAGS) -o cohort-bridge ./cmd/cohort-bridge
 
 .PHONY: test-program
 test-program:
@@ -144,25 +124,9 @@ test-local: build
 	done
 
 # Run specific programs with arguments
-.PHONY: run-agent
-run-agent:
-	go run ./cmd/agent $(ARGS)
-
-.PHONY: run-tokenize
-run-tokenize:
-	go run ./cmd/tokenize $(ARGS)
-
-.PHONY: run-intersect
-run-intersect:
-	go run ./cmd/intersect $(ARGS)
-
-.PHONY: run-send
-run-send:
-	go run ./cmd/send $(ARGS)
-
-.PHONY: run-validate
-run-validate:
-	go run ./cmd/validate $(ARGS)
+.PHONY: run-cohort-bridge
+run-cohort-bridge:
+	go run ./cmd/cohort-bridge $(ARGS)
 
 .PHONY: run-test
 run-test:
@@ -178,25 +142,9 @@ demo: build
 	@echo "4. This is a placeholder - implement actual demo steps"
 
 # Show help for individual programs
-.PHONY: help-agent
-help-agent:
-	go run ./cmd/agent -help
-
-.PHONY: help-tokenize
-help-tokenize:
-	go run ./cmd/tokenize -help
-
-.PHONY: help-intersect
-help-intersect:
-	go run ./cmd/intersect -help
-
-.PHONY: help-send
-help-send:
-	go run ./cmd/send -help
-
-.PHONY: help-validate
-help-validate:
-	go run ./cmd/validate -help
+.PHONY: help-cohort-bridge
+help-cohort-bridge:
+	go run ./cmd/cohort-bridge -help
 
 .PHONY: help-test
 help-test:
@@ -209,55 +157,42 @@ help:
 	@echo "========================"
 	@echo ""
 	@echo "Building:"
-	@echo "  build       - Build all programs"
-	@echo "  agent       - Build agent orchestrator"
-	@echo "  tokenize    - Build tokenization program"
-	@echo "  intersect   - Build intersection finder"
-	@echo "  send        - Build data sender"
-	@echo "  validate    - Build validation program"
-	@echo "  test        - Build test harness"
+	@echo "  build           - Build all programs"
+	@echo "  cohort-bridge   - Build cohort-bridge program"
+	@echo "  test            - Build test harness"
 	@echo ""
 	@echo "Installation:"
-	@echo "  install     - Install all programs to GOPATH/bin"
-	@echo "  build-all   - Build for multiple platforms"
+	@echo "  install         - Install all programs to GOPATH/bin"
+	@echo "  build-all       - Build for multiple platforms"
 	@echo ""
 	@echo "Testing:"
-	@echo "  test-go     - Run Go unit tests"
-	@echo "  test-local  - Test local builds"
-	@echo "  lint        - Run linter"
+	@echo "  test-go         - Run Go unit tests"
+	@echo "  test-local      - Test local builds"
+	@echo "  lint            - Run linter"
 	@echo ""
 	@echo "Development:"
-	@echo "  deps        - Install development dependencies"
-	@echo "  dev         - Development workflow (deps + build + test)"
-	@echo "  demo        - Run demo workflow"
+	@echo "  deps            - Install development dependencies"
+	@echo "  dev             - Development workflow (deps + build + test)"
+	@echo "  demo            - Run demo workflow"
 	@echo ""
 	@echo "Running programs:"
-	@echo "  run-agent   - Run agent (use ARGS='...' for arguments)"
-	@echo "  run-tokenize- Run tokenize (use ARGS='...' for arguments)" 
-	@echo "  run-intersect- Run intersect (use ARGS='...' for arguments)"
-	@echo "  run-send    - Run send (use ARGS='...' for arguments)"
-	@echo "  run-validate- Run validate (use ARGS='...' for arguments)"
-	@echo "  run-test    - Run test (use ARGS='...' for arguments)"
+	@echo "  run-cohort-bridge - Run cohort-bridge (use ARGS='...' for arguments)"
+	@echo "  run-test          - Run test (use ARGS='...' for arguments)"
 	@echo ""
 	@echo "Help for programs:"
-	@echo "  help-agent  - Show agent help"
-	@echo "  help-tokenize- Show tokenize help"
-	@echo "  help-intersect- Show intersect help"
-	@echo "  help-send   - Show send help" 
-	@echo "  help-validate- Show validate help"
-	@echo "  help-test   - Show test help"
+	@echo "  help-cohort-bridge - Show cohort-bridge help"
+	@echo "  help-test          - Show test help"
 	@echo ""
 	@echo "Cleanup:"
-	@echo "  clean       - Clean build artifacts"
-	@echo "  clean-dist  - Clean distribution files"
-	@echo "  clean-all   - Clean everything"
+	@echo "  clean           - Clean build artifacts"
+	@echo "  clean-dist      - Clean distribution files"
+	@echo "  clean-all       - Clean everything"
 	@echo ""
 	@echo "Release:"
-	@echo "  release     - Create release packages"
-	@echo "  docker-build- Build Docker image"
+	@echo "  release         - Create release packages"
+	@echo "  docker-build    - Build Docker image"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build"
-	@echo "  make run-agent ARGS='-workflow -config=config.yaml'"
-	@echo "  make run-tokenize ARGS='-config=config.yaml -output=tokens.json'"
-	@echo "  make run-intersect ARGS='-dataset1=tokens1.json -dataset2=tokens2.json'" 
+	@echo "  make run-cohort-bridge ARGS='tokenize -input=data.csv -output=tokens.csv'"
+	@echo "  make run-cohort-bridge ARGS='intersect -dataset1=tokens1.csv -dataset2=tokens2.csv'" 

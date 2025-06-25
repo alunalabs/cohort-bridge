@@ -13,19 +13,19 @@ A secure, HIPAA-compliant system for privacy-preserving record linkage that enab
 
 ## 🚀 Quick Start
 
-### 1. Download the CLI Tools
+### 1. Download the CLI Tool
 
-Download the latest release from our [GitHub Releases page](https://github.com/your-org/cohort-bridge/releases):
+Download the latest release from our [GitHub Releases page](https://github.com/alunalabs/cohort-bridge/releases):
 
 ```bash
 # Download for your platform
-curl -L https://github.com/your-org/cohort-bridge/releases/latest/download/cohort-bridge-windows.zip -o cohort-bridge.zip
+curl -L https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-windows.zip -o cohort-bridge.zip
 unzip cohort-bridge.zip
 ```
 
 Or compile from source:
 ```bash
-git clone https://github.com/your-org/cohort-bridge.git
+git clone https://github.com/alunalabs/cohort-bridge.git
 cd cohort-bridge
 make build
 ```
@@ -66,13 +66,13 @@ cp config_postgres.example.yaml config.yaml
 
 Edit the config file to point to your data files and configure your preferences.
 
-### 4. Run the Interactive Agent
+### 4. Run the Interactive Mode
 
 ```bash
-./agent
+./cohort-bridge
 ```
 
-The agent will guide you through:
+The interactive mode will guide you through:
 - 🔄 **Mode Selection** - Choose Receiver, Sender, or Local processing
 - 📁 **File Discovery** - Automatically find and validate your config files
 - ⚙️ **Configuration** - Real-time validation with helpful error messages
@@ -80,53 +80,80 @@ The agent will guide you through:
 
 ### 5. Alternative: Direct CLI Usage
 
-For advanced users or automation:
+CohortBridge provides a unified CLI with subcommands for specific tasks:
 
 ```bash
-# Tokenize your data first (enhanced security)
-./tokenize -input data/patients.csv -output out/tokens.json
+# Interactive mode (recommended for beginners)
+./cohort-bridge
 
-# Run matching
-./agent -mode=receiver -config=config.yaml
-./agent -mode=sender -config=config_sender.yaml
+# Tokenize your data (enhanced security)
+./cohort-bridge tokenize -input data/patients.csv -output out/tokens.csv
 
-# Validate results
-./validate -input out/matches.csv -output out/validation.csv
+# Find intersections between datasets
+./cohort-bridge intersect -dataset1 out/tokens1.csv -dataset2 out/tokens2.csv
 
-# Find intersections
-./intersect -input1 out/tokens1.json -input2 out/tokens2.json
+# Send results to another party
+./cohort-bridge send -intersection out/results.csv -host peer.example.com -port 8080
+
+# Validate matching results
+./cohort-bridge validate -ground-truth data/truth.csv -results out/matches.csv
+
+# Run complete workflows (legacy mode)
+./cohort-bridge -mode=receiver -config=config.yaml
+./cohort-bridge -mode=sender -config=config_sender.yaml
+
+# Get help for any subcommand
+./cohort-bridge tokenize -help
+./cohort-bridge intersect -help
 ```
 
 ## 🏗️ Architecture & File Structure
 
-### Command Line Tools (`cmd/`)
+### Command Line Tool (`cmd/cohort-bridge/`)
 
-CohortBridge provides focused CLI programs that handle specific tasks:
+CohortBridge provides a unified CLI program with focused subcommands:
 
-- **`agent/`** - Interactive orchestrator and network coordinator
-  - Guides users through the complete workflow
-  - Handles network communication between parties
-  - Provides beautiful interactive UI with validation
+- **Interactive Mode** - User-friendly guided workflow
+  - Automatically detects configuration files
+  - Provides real-time validation and error messages
+  - Beautiful interactive UI with progress indicators
+  - Suitable for both beginners and experts
 
-- **`tokenize/`** - Privacy-preserving data preparation
+- **`tokenize`** - Privacy-preserving data preparation
   - Converts raw PHI into Bloom filter tokens
   - Enables secure data processing workflows
-  - Supports CSV and JSON input formats
+  - Supports CSV, JSON, and database input formats
+  - Usage: `cohort-bridge tokenize -input data.csv -output tokens.csv`
 
-- **`validate/`** - Data quality and results validation
-  - Validates input data format and quality
-  - Analyzes matching results for accuracy metrics
-  - Generates comprehensive validation reports
-
-- **`intersect/`** - Record linkage and intersection finding
+- **`intersect`** - Record linkage and intersection finding
   - Core matching logic using Bloom filters and MinHash
   - Implements secure blocking and fuzzy matching
   - Handles both tokenized and raw data modes
+  - Usage: `cohort-bridge intersect -dataset1 tokens1.csv -dataset2 tokens2.csv`
 
-- **`send/`** - Secure result transmission
+- **`send`** - Secure result transmission
   - Network communication for sharing results
   - Encrypted data exchange between parties
   - Handles authentication and secure protocols
+  - Usage: `cohort-bridge send -intersection results.csv -host peer.com -port 8080`
+
+- **`validate`** - Data quality and results validation
+  - Validates input data format and quality
+  - Analyzes matching results for accuracy metrics
+  - Generates comprehensive validation reports
+  - Usage: `cohort-bridge validate -ground-truth truth.csv -results results.csv`
+
+- **Legacy Mode** - Backward compatibility
+  - Supports older command-line workflows
+  - Handles network communication between parties  
+  - Usage: `cohort-bridge -mode=receiver -config=config.yaml`
+
+### Test Harness (`cmd/test/`)
+
+Separate testing program for validation and benchmarking:
+- End-to-end testing with synthetic datasets
+- Performance benchmarking and validation
+- Accuracy metrics and privacy analysis
 
 ### Core Internal Packages (`internal/`)
 
@@ -182,8 +209,8 @@ The business logic is implemented in modular internal packages:
 
 ### Support Files
 
-- (TBD) **Documentation**: `ARCHITECTURE.md`, `SECURITY_FEATURES.md`, `INSTALL.md`
-- (TBD) **Scripts**: `scripts/install.ps1`, demo scripts for testing
+- **Documentation**: `ARCHITECTURE.md`, `SECURITY_FEATURES.md`, `INSTALL.md`
+- **Scripts**: `scripts/install.ps1`, demo scripts for testing
 - **Web Interface**: `web/` - Next.js configuration builder (optional)
 
 ## 🔐 Security Features
@@ -262,31 +289,39 @@ The business logic is implemented in modular internal packages:
 **Two-Party Matching**
 ```bash
 # Party A (Receiver)
-./agent -mode=receiver -config=config_a.yaml
+./cohort-bridge -mode=receiver -config=config_a.yaml
+# OR use interactive mode
+./cohort-bridge
 
 # Party B (Sender)  
-./agent -mode=sender -config=config_b.yaml
+./cohort-bridge -mode=sender -config=config_b.yaml
+# OR use interactive mode
+./cohort-bridge
 ```
 
 **Enhanced Security (Tokenized)**
 ```bash
 # Step 1: Tokenize data in secure environment
-./tokenize -input data/patients.csv -output tokens.json
+./cohort-bridge tokenize -input data/patients.csv -output tokens.csv
 
 # Step 2: Match using tokens in less secure environment
-./agent -mode=receiver -config=config_tokenized.yaml
+./cohort-bridge -mode=receiver -config=config_tokenized.yaml
 ```
 
-**Local Processing**
+**Local Processing Workflow**
 ```bash
-# Process both datasets locally
-./agent -mode=local -config=config_local.yaml
+# Complete workflow on single machine
+./cohort-bridge tokenize -input data/dataset1.csv -output tokens1.csv
+./cohort-bridge tokenize -input data/dataset2.csv -output tokens2.csv
+./cohort-bridge intersect -dataset1 tokens1.csv -dataset2 tokens2.csv
+./cohort-bridge validate -ground-truth data/truth.csv -results intersection_results.csv
 ```
 
 **Database Integration**
 ```bash
 # Use PostgreSQL for large datasets
-./agent -config=config_postgres.yaml
+./cohort-bridge tokenize -database -main-config config_postgres.yaml
+./cohort-bridge -config=config_postgres.yaml
 ```
 
 ## 📊 Performance & Scalability
@@ -316,8 +351,11 @@ The business logic is implemented in modular internal packages:
 # Run comprehensive test harness
 make test
 
-# Run specific test scenarios
-./agent -mode=test -records1=1000 -records2=1200 -overlap=0.3
+# Run specific test scenarios using the test program
+./test -records1=1000 -records2=1200 -overlap=0.3
+
+# Validate specific results
+./cohort-bridge validate -ground-truth test_data/truth.csv -results out/matches.csv
 ```
 
 ### Validation Metrics
@@ -377,15 +415,14 @@ matching:
 - Kubernetes manifests for scalable deployment
 - Helm charts for easy configuration management
 
-## 📚 Documentation  TBD
+## 📚 Documentation
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed system architecture
 - **[SECURITY_FEATURES.md](SECURITY_FEATURES.md)** - Comprehensive security analysis  
 - **[INSTALL.md](INSTALL.md)** - Installation and deployment guide
 - **[STREAMING_README.md](STREAMING_README.md)** - Streaming and real-time processing
-- **Command-specific READMEs** in each `cmd/` directory
 
-## 🤝 Contributing  TBD
+## 🤝 Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
 - Code style and standards
@@ -400,6 +437,6 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 ## 📞 Support
 
 - **Documentation**: [TBD](URL_TBD)
-- **Issues**: [GitHub Issues](https://github.com/your-org/cohort-bridge/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/cohort-bridge/discussions)
+- **Issues**: [GitHub Issues](https://github.com/alunalabs/cohort-bridge/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/alunalabs/cohort-bridge/discussions)
 - **Security Issues**: Please report privately to [admin@nerve.run](mailto:admin@nerve.run) 
