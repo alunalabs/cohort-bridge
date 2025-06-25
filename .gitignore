@@ -61,3 +61,6 @@ tmp/
 
 # testing
 cmd/test
+test_cohort_bridge.sh
+temp-receiver/
+temp-sender/

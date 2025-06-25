@@ -10,12 +10,15 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
+	"github.com/manifoldco/promptui"
 )
 
 type TokenizedRecord struct {
@@ -40,6 +43,7 @@ type TokenizationConfig struct {
 	QGramLength         int      `json:"qgram_length"`
 	UseDatabase         bool     `json:"use_database"`
 	DatabaseConfig      string   `json:"database_config"`
+	MinHashSeed         string   `json:"minhash_seed"`
 }
 
 // RecordReader interface for streaming input
@@ -253,6 +257,7 @@ func main() {
 		batchSize      = flag.Int("batch-size", 1000, "Number of records to process in each batch")
 		interactive    = flag.Bool("interactive", false, "Use interactive mode")
 		useDatabase    = flag.Bool("database", false, "Use database from main config instead of file")
+		minHashSeed    = flag.String("minhash-seed", "cohort-bridge-shared-seed-2024", "Seed for deterministic MinHash generation")
 	)
 	flag.Parse()
 
@@ -311,6 +316,7 @@ func main() {
 			QGramLength:         2,
 			UseDatabase:         true,
 			DatabaseConfig:      *mainConfigFile,
+			MinHashSeed:         *minHashSeed,
 		}
 	} else {
 		// Command line mode
@@ -338,6 +344,7 @@ func main() {
 			QGramLength:         2,
 			UseDatabase:         false,
 			DatabaseConfig:      "",
+			MinHashSeed:         *minHashSeed,
 		}
 	}
 
@@ -493,8 +500,8 @@ func processBatch(batch []map[string]string, writer RecordWriter, tokConfig *Tok
 			tokConfig.RandomBitsPercent,
 		)
 
-		// Create MinHash
-		mh, err := pprl.NewMinHash(tokConfig.MinHashPermutations, tokConfig.MinHashSignatures)
+		// Create MinHash with deterministic seed
+		mh, err := pprl.NewMinHashSeeded(tokConfig.MinHashPermutations, tokConfig.MinHashSignatures, tokConfig.MinHashSeed)
 		if err != nil {
 			return fmt.Errorf("failed to create MinHash: %w", err)
 		}
@@ -516,7 +523,7 @@ func processBatch(batch []map[string]string, writer RecordWriter, tokConfig *Tok
 		}
 
 		// Compute MinHash signature
-		_, err = mh.ComputeSignature(bf)
+		signature, err := mh.ComputeSignature(bf)
 		if err != nil {
 			return fmt.Errorf("failed to compute MinHash signature: %w", err)
 		}
@@ -527,10 +534,12 @@ func processBatch(batch []map[string]string, writer RecordWriter, tokConfig *Tok
 			return fmt.Errorf("failed to encode Bloom filter: %w", err)
 		}
 
-		minHashData, err := pprl.MinHashToBase64(mh)
+		// Convert MinHash signature to JSON format (for compatibility with intersect)
+		minHashJSON, err := json.Marshal(signature)
 		if err != nil {
-			return fmt.Errorf("failed to encode MinHash: %w", err)
+			return fmt.Errorf("failed to encode MinHash signature: %w", err)
 		}
+		minHashData := string(minHashJSON)
 
 		// Create tokenized record
 		tokenized := TokenizedRecord{
@@ -619,6 +628,7 @@ func loadTokenizationConfig(filename string) (*TokenizationConfig, error) {
 		MinHashPermutations: 1000,
 		RandomBitsPercent:   0.0,
 		QGramLength:         2,
+		MinHashSeed:         "cohort-bridge-shared-seed-2024",
 	}
 
 	// Save example config
@@ -635,65 +645,244 @@ func loadTokenizationConfig(filename string) (*TokenizationConfig, error) {
 }
 
 func getInteractiveConfig(defaultFields []string, useDatabase bool) (*TokenizationConfig, error) {
+	fmt.Println("🔐 CohortBridge Tokenization Configuration")
+	fmt.Println("Interactive mode - let's set up your tokenization parameters!")
+	fmt.Println()
+
 	config := &TokenizationConfig{
 		UseDatabase: useDatabase,
+		MinHashSeed: "cohort-bridge-shared-seed-2024", // Default shared seed
 	}
 
 	if !useDatabase {
-		fmt.Print("📁 Input file path: ")
-		fmt.Scanln(&config.InputFile)
+		// Input file prompt
+		inputPrompt := promptui.Prompt{
+			Label: "📁 Input file path",
+			Validate: func(input string) error {
+				if strings.TrimSpace(input) == "" {
+					return fmt.Errorf("input file path cannot be empty")
+				}
+				if _, err := os.Stat(input); os.IsNotExist(err) {
+					return fmt.Errorf("file does not exist: %s", input)
+				}
+				return nil
+			},
+		}
 
-		fmt.Print("📝 Input format (csv/json, default: auto-detect): ")
-		var inputFmt string
-		fmt.Scanln(&inputFmt)
-		config.InputFormat = detectInputFormat(config.InputFile, inputFmt)
+		inputFile, err := inputPrompt.Run()
+		if err != nil {
+			return nil, fmt.Errorf("input cancelled: %w", err)
+		}
+		config.InputFile = inputFile
+
+		// Input format selection
+		inputFormatPrompt := promptui.Select{
+			Label: "📝 Input format",
+			Items: []string{"Auto-detect", "CSV", "JSON"},
+			Templates: &promptui.SelectTemplates{
+				Active:   "▶ {{ . | cyan }}",
+				Inactive: "  {{ . | white }}",
+				Selected: "✓ {{ . | green }}",
+			},
+		}
+
+		formatIndex, _, err := inputFormatPrompt.Run()
+		if err != nil {
+			return nil, fmt.Errorf("selection cancelled: %w", err)
+		}
+
+		switch formatIndex {
+		case 0:
+			config.InputFormat = detectInputFormat(config.InputFile, "")
+		case 1:
+			config.InputFormat = "csv"
+		case 2:
+			config.InputFormat = "json"
+		}
 	} else {
 		config.InputFormat = "postgres"
 	}
 
-	fmt.Print("📁 Output file path (default: out/tokens.json): ")
-	var output string
-	fmt.Scanln(&output)
-	if output == "" {
-		config.OutputFile = "out/tokens.json"
-	} else {
-		config.OutputFile = output
+	// Output file prompt
+	outputPrompt := promptui.Prompt{
+		Label:   "📁 Output file path",
+		Default: "out/tokens.csv",
+		Validate: func(input string) error {
+			if strings.TrimSpace(input) == "" {
+				return fmt.Errorf("output file path cannot be empty")
+			}
+			// Check if directory exists or can be created
+			dir := filepath.Dir(input)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("cannot create output directory: %w", err)
+			}
+			return nil
+		},
 	}
 
-	fmt.Print("📝 Output format (csv/json, default: auto-detect): ")
-	var outputFmt string
-	fmt.Scanln(&outputFmt)
-	config.OutputFormat = detectOutputFormat(config.OutputFile, outputFmt)
+	outputFile, err := outputPrompt.Run()
+	if err != nil {
+		return nil, fmt.Errorf("input cancelled: %w", err)
+	}
+	config.OutputFile = outputFile
 
-	fmt.Print("📊 Batch size (default: 1000): ")
-	var batchStr string
-	fmt.Scanln(&batchStr)
-	if batchStr == "" {
-		config.BatchSize = 1000
-	} else {
-		fmt.Sscanf(batchStr, "%d", &config.BatchSize)
+	// Output format selection
+	outputFormatPrompt := promptui.Select{
+		Label: "📝 Output format",
+		Items: []string{"Auto-detect", "CSV", "JSON"},
+		Templates: &promptui.SelectTemplates{
+			Active:   "▶ {{ . | cyan }}",
+			Inactive: "  {{ . | white }}",
+			Selected: "✓ {{ . | green }}",
+		},
 	}
 
-	fmt.Printf("📝 Fields to tokenize (comma-separated, default: %s): ", strings.Join(defaultFields, ","))
-	var fieldsStr string
-	fmt.Scanln(&fieldsStr)
-	if fieldsStr == "" {
-		config.Fields = defaultFields
+	outFormatIndex, _, err := outputFormatPrompt.Run()
+	if err != nil {
+		return nil, fmt.Errorf("selection cancelled: %w", err)
+	}
+
+	switch outFormatIndex {
+	case 0:
+		config.OutputFormat = detectOutputFormat(config.OutputFile, "")
+	case 1:
+		config.OutputFormat = "csv"
+	case 2:
+		config.OutputFormat = "json"
+	}
+
+	// Batch size prompt
+	batchPrompt := promptui.Prompt{
+		Label:   "📊 Batch size for processing",
+		Default: "1000",
+		Validate: func(input string) error {
+			if val, err := strconv.Atoi(input); err != nil || val <= 0 {
+				return fmt.Errorf("batch size must be a positive integer")
+			}
+			return nil
+		},
+	}
+
+	batchStr, err := batchPrompt.Run()
+	if err != nil {
+		return nil, fmt.Errorf("input cancelled: %w", err)
+	}
+	config.BatchSize, _ = strconv.Atoi(batchStr)
+
+	// Fields configuration
+	fieldsPrompt := promptui.Prompt{
+		Label:   fmt.Sprintf("📝 Fields to tokenize (comma-separated)"),
+		Default: strings.Join(defaultFields, ","),
+		Validate: func(input string) error {
+			if strings.TrimSpace(input) == "" {
+				return fmt.Errorf("at least one field must be specified")
+			}
+			return nil
+		},
+	}
+
+	fieldsStr, err := fieldsPrompt.Run()
+	if err != nil {
+		return nil, fmt.Errorf("input cancelled: %w", err)
+	}
+
+	config.Fields = strings.Split(fieldsStr, ",")
+	for i, field := range config.Fields {
+		config.Fields[i] = strings.TrimSpace(field)
+	}
+
+	// Advanced configuration option
+	advancedPrompt := promptui.Select{
+		Label: "⚙️  Configure advanced parameters?",
+		Items: []string{"Use defaults (recommended)", "Customize advanced settings"},
+		Templates: &promptui.SelectTemplates{
+			Active:   "▶ {{ . | cyan }}",
+			Inactive: "  {{ . | white }}",
+			Selected: "✓ {{ . | green }}",
+		},
+	}
+
+	advancedIndex, _, err := advancedPrompt.Run()
+	if err != nil {
+		return nil, fmt.Errorf("selection cancelled: %w", err)
+	}
+
+	if advancedIndex == 0 {
+		// Use defaults
+		config.BloomFilterSize = 1000
+		config.BloomHashCount = 5
+		config.MinHashSignatures = 128
+		config.MinHashPermutations = 1000
+		config.RandomBitsPercent = 0.0
+		config.QGramLength = 2
 	} else {
-		config.Fields = strings.Split(fieldsStr, ",")
-		for i, field := range config.Fields {
-			config.Fields[i] = strings.TrimSpace(field)
+		// Custom advanced settings
+		fmt.Println("\n🔧 Advanced Configuration:")
+
+		// Bloom filter size
+		bfSizePrompt := promptui.Prompt{
+			Label:   "Bloom filter size (bits)",
+			Default: "1000",
+			Validate: func(input string) error {
+				if val, err := strconv.ParseUint(input, 10, 32); err != nil || val == 0 {
+					return fmt.Errorf("bloom filter size must be a positive integer")
+				}
+				return nil
+			},
 		}
+
+		bfSizeStr, err := bfSizePrompt.Run()
+		if err != nil {
+			return nil, fmt.Errorf("input cancelled: %w", err)
+		}
+		val, _ := strconv.ParseUint(bfSizeStr, 10, 32)
+		config.BloomFilterSize = uint32(val)
+
+		// Hash functions
+		hashPrompt := promptui.Prompt{
+			Label:   "Number of hash functions",
+			Default: "5",
+			Validate: func(input string) error {
+				if val, err := strconv.ParseUint(input, 10, 32); err != nil || val == 0 {
+					return fmt.Errorf("number of hash functions must be a positive integer")
+				}
+				return nil
+			},
+		}
+
+		hashStr, err := hashPrompt.Run()
+		if err != nil {
+			return nil, fmt.Errorf("input cancelled: %w", err)
+		}
+		hashVal, _ := strconv.ParseUint(hashStr, 10, 32)
+		config.BloomHashCount = uint32(hashVal)
+
+		// MinHash signatures
+		minHashPrompt := promptui.Prompt{
+			Label:   "MinHash signatures",
+			Default: "128",
+			Validate: func(input string) error {
+				if val, err := strconv.ParseUint(input, 10, 32); err != nil || val == 0 {
+					return fmt.Errorf("MinHash signatures must be a positive integer")
+				}
+				return nil
+			},
+		}
+
+		minHashStr, err := minHashPrompt.Run()
+		if err != nil {
+			return nil, fmt.Errorf("input cancelled: %w", err)
+		}
+		minHashVal, _ := strconv.ParseUint(minHashStr, 10, 32)
+		config.MinHashSignatures = uint32(minHashVal)
+
+		// Set remaining defaults
+		config.MinHashPermutations = 1000
+		config.RandomBitsPercent = 0.0
+		config.QGramLength = 2
 	}
 
-	// Set reasonable defaults
-	config.BloomFilterSize = 1000
-	config.BloomHashCount = 5
-	config.MinHashSignatures = 128
-	config.MinHashPermutations = 1000
-	config.RandomBitsPercent = 0.0
-	config.QGramLength = 2
-
+	fmt.Println("\n✅ Configuration completed!")
 	return config, nil
 }
 

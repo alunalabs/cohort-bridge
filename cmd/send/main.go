@@ -151,6 +151,11 @@ func sendIntersectionResults(results []IntersectionResult, config *SendConfig, c
 
 	fmt.Printf("   📊 Sending %d matched pairs\n", len(matchData.Records))
 
+	if len(matchData.Records) == 0 {
+		fmt.Println("   ℹ️  No matches found - skipping network transmission")
+		return nil
+	}
+
 	// Use the existing server sender functionality with the match data
 	if cfg != nil {
 		return server.SendIntersectionData(cfg, &matchData)
@@ -217,8 +222,13 @@ func loadIntersectionResultsCSV(filename string) ([]IntersectionResult, error) {
 		return nil, err
 	}
 
-	if len(rows) < 2 {
-		return nil, fmt.Errorf("CSV file must have header and at least one data row")
+	if len(rows) < 1 {
+		return nil, fmt.Errorf("CSV file must have at least a header row")
+	}
+
+	// Handle empty intersection results (only header, no data rows)
+	if len(rows) == 1 {
+		return []IntersectionResult{}, nil
 	}
 
 	// Expected header: id1,id2,is_match,hamming_distance,jaccard_similarity,match_score,timestamp

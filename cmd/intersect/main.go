@@ -37,14 +37,19 @@ type IntersectionResult struct {
 }
 
 func main() {
+	fmt.Println("🔍 CohortBridge Intersection Finder")
+	fmt.Println("====================================")
+	fmt.Println("Find matches between tokenized datasets using PPRL techniques")
+	fmt.Println()
+
 	var (
-		dataset1         = flag.String("dataset1", "", "Path to first tokenized dataset (required)")
-		dataset2         = flag.String("dataset2", "", "Path to second tokenized dataset (required)")
-		output           = flag.String("output", "intersection_results.csv", "Output file for intersection results")
+		dataset1         = flag.String("dataset1", "", "Path to first tokenized dataset file")
+		dataset2         = flag.String("dataset2", "", "Path to second tokenized dataset file")
+		outputFile       = flag.String("output", "intersection_results.csv", "Output file for intersection results")
 		configFile       = flag.String("config", "", "Optional configuration file")
-		hammingThreshold = flag.Uint("hamming-threshold", 100, "Maximum Hamming distance for match")
-		jaccardThreshold = flag.Float64("jaccard-threshold", 0.5, "Minimum Jaccard similarity")
-		batchSize        = flag.Int("batch-size", 1000, "Processing batch size")
+		hammingThreshold = flag.Uint("hamming-threshold", 300, "Maximum Hamming distance for match")
+		jaccardThreshold = flag.Float64("jaccard-threshold", 0.8, "Minimum Jaccard similarity")
+		batchSize        = flag.Int("batch-size", 1000, "Processing batch size for streaming mode")
 		streaming        = flag.Bool("streaming", false, "Enable streaming mode for large datasets")
 		help             = flag.Bool("help", false, "Show help message")
 	)
@@ -56,16 +61,16 @@ func main() {
 	}
 
 	if *dataset1 == "" || *dataset2 == "" {
-		fmt.Println("Error: Both dataset1 and dataset2 are required")
+		fmt.Println("❌ Error: Both dataset1 and dataset2 must be specified")
+		fmt.Println()
 		showHelp()
 		os.Exit(1)
 	}
 
-	// Create intersection configuration
-	intersectConfig := &IntersectConfig{
+	config := &IntersectConfig{
 		Dataset1:         *dataset1,
 		Dataset2:         *dataset2,
-		OutputFile:       *output,
+		OutputFile:       *outputFile,
 		HammingThreshold: uint32(*hammingThreshold),
 		JaccardThreshold: *jaccardThreshold,
 		BatchSize:        *batchSize,
@@ -73,22 +78,20 @@ func main() {
 		ConfigFile:       *configFile,
 	}
 
-	fmt.Println("🔍 CohortBridge Intersection Finder")
-	fmt.Printf("📁 Dataset 1: %s\n", intersectConfig.Dataset1)
-	fmt.Printf("📁 Dataset 2: %s\n", intersectConfig.Dataset2)
-	fmt.Printf("📊 Output: %s\n", intersectConfig.OutputFile)
-	fmt.Printf("🎯 Hamming threshold: %d\n", intersectConfig.HammingThreshold)
-	fmt.Printf("📈 Jaccard threshold: %.3f\n", intersectConfig.JaccardThreshold)
-	if intersectConfig.Streaming {
-		fmt.Printf("📊 Streaming mode: enabled (batch size: %d)\n", intersectConfig.BatchSize)
+	// Display configuration
+	fmt.Printf("📁 Dataset 1: %s\n", config.Dataset1)
+	fmt.Printf("📁 Dataset 2: %s\n", config.Dataset2)
+	fmt.Printf("📊 Output: %s\n", config.OutputFile)
+	fmt.Printf("🎯 Hamming threshold: %d\n", config.HammingThreshold)
+	fmt.Printf("📈 Jaccard threshold: %.3f\n", config.JaccardThreshold)
+	if config.Streaming {
+		fmt.Printf("⚡ Streaming mode: enabled (batch size: %d)\n", config.BatchSize)
 	}
+	fmt.Println()
 
-	// Load and process datasets
-	if err := performIntersection(intersectConfig); err != nil {
-		log.Fatalf("Intersection failed: %v", err)
+	if err := performIntersection(config); err != nil {
+		log.Fatalf("❌ Intersection failed: %v", err)
 	}
-
-	fmt.Println("✅ Intersection completed successfully")
 }
 
 func performIntersection(config *IntersectConfig) error {
@@ -336,60 +339,55 @@ func saveIntersectionResultsCSV(results []IntersectionResult, filename string) e
 }
 
 func showHelp() {
-	fmt.Println("CohortBridge Intersection Finder")
-	fmt.Println("=================================")
+	fmt.Println("🔍 CohortBridge Intersection Finder")
+	fmt.Println("====================================")
+	fmt.Println("Find matches between tokenized datasets using privacy-preserving record linkage")
 	fmt.Println()
-	fmt.Println("Find the intersection between two tokenized datasets using privacy-preserving")
-	fmt.Println("record linkage techniques.")
+
+	fmt.Println("📋 USAGE:")
+	fmt.Println("  intersect -dataset1=<file1> -dataset2=<file2> [options]")
 	fmt.Println()
-	fmt.Println("USAGE:")
-	fmt.Println("  intersect [OPTIONS]")
+
+	fmt.Println("🔧 OPTIONS:")
+	fmt.Println("  -dataset1 string     Path to first tokenized dataset file (required)")
+	fmt.Println("  -dataset2 string     Path to second tokenized dataset file (required)")
+	fmt.Println("  -output string       Output file for intersection results")
+	fmt.Println("                       (default: intersection_results.csv)")
+	fmt.Println("  -config string       Optional configuration file for advanced settings")
+	fmt.Println("  -hamming-threshold   Maximum Hamming distance for match (default: 300)")
+	fmt.Println("  -jaccard-threshold   Minimum Jaccard similarity for match (default: 0.8)")
+	fmt.Println("  -batch-size int      Processing batch size for streaming (default: 1000)")
+	fmt.Println("  -streaming           Enable streaming mode for large datasets")
+	fmt.Println("  -help               Show this help message")
 	fmt.Println()
-	fmt.Println("OPTIONS:")
-	fmt.Println("  -dataset1 string")
-	fmt.Println("        Path to first tokenized dataset file (required)")
-	fmt.Println("  -dataset2 string")
-	fmt.Println("        Path to second tokenized dataset file (required)")
-	fmt.Println("  -output string")
-	fmt.Println("        Output file for intersection results (default: intersection_results.csv)")
-	fmt.Println("  -config string")
-	fmt.Println("        Optional configuration file for advanced settings")
-	fmt.Println("  -hamming-threshold uint")
-	fmt.Println("        Maximum Hamming distance for match (default: 100)")
-	fmt.Println("  -jaccard-threshold float")
-	fmt.Println("        Minimum Jaccard similarity for match (default: 0.5)")
-	fmt.Println("  -batch-size int")
-	fmt.Println("        Processing batch size for streaming mode (default: 1000)")
-	fmt.Println("  -streaming")
-	fmt.Println("        Enable streaming mode for large datasets")
-	fmt.Println("  -help")
-	fmt.Println("        Show this help message")
+
+	fmt.Println("💡 EXAMPLES:")
+	fmt.Println("  # Basic intersection")
+	fmt.Println("  intersect -dataset1=tokens_a.csv -dataset2=tokens_b.csv")
 	fmt.Println()
-	fmt.Println("EXAMPLES:")
-	fmt.Println("  # Find intersection between two datasets")
-	fmt.Println("  ./intersect -dataset1=tokenized_a.csv -dataset2=tokenized_b.csv")
+	fmt.Println("  # Custom thresholds for stricter matching")
+	fmt.Println("  intersect -dataset1=data1.csv -dataset2=data2.csv \\")
+	fmt.Println("           -hamming-threshold=50 -jaccard-threshold=0.9")
 	fmt.Println()
-	fmt.Println("  # Use custom thresholds")
-	fmt.Println("  ./intersect -dataset1=data1.csv -dataset2=data2.csv \\")
-	fmt.Println("    -hamming-threshold=50 -jaccard-threshold=0.8")
+	fmt.Println("  # Streaming mode for large datasets")
+	fmt.Println("  intersect -dataset1=large1.csv -dataset2=large2.csv \\")
+	fmt.Println("           -streaming -batch-size=500")
 	fmt.Println()
-	fmt.Println("  # Enable streaming for large datasets")
-	fmt.Println("  ./intersect -dataset1=large1.csv -dataset2=large2.csv \\")
-	fmt.Println("    -streaming -batch-size=500")
-	fmt.Println()
-	fmt.Println("INPUT FORMAT:")
+
+	fmt.Println("📄 INPUT FORMAT:")
 	fmt.Println("  CSV files with headers: id,bloom_filter,minhash,timestamp")
-	fmt.Println("  - id: Record identifier")
-	fmt.Println("  - bloom_filter: Base64 encoded Bloom filter")
-	fmt.Println("  - minhash: JSON array of MinHash signature")
-	fmt.Println("  - timestamp: Tokenization timestamp")
+	fmt.Println("  • id: Record identifier")
+	fmt.Println("  • bloom_filter: Base64 encoded Bloom filter")
+	fmt.Println("  • minhash: JSON array of MinHash signature")
+	fmt.Println("  • timestamp: Tokenization timestamp")
 	fmt.Println()
-	fmt.Println("OUTPUT FORMAT:")
-	fmt.Println("  CSV file with headers: id1,id2,is_match,hamming_distance,jaccard_similarity,match_score,timestamp")
-	fmt.Println("  - id1, id2: Record identifiers from dataset1 and dataset2")
-	fmt.Println("  - is_match: Boolean indicating if records match")
-	fmt.Println("  - hamming_distance: Bit differences between Bloom filters")
-	fmt.Println("  - jaccard_similarity: Estimated similarity score")
-	fmt.Println("  - match_score: Composite matching score")
-	fmt.Println("  - timestamp: When intersection was computed")
+
+	fmt.Println("📊 OUTPUT FORMAT:")
+	fmt.Println("  CSV file with match results:")
+	fmt.Println("  • id1, id2: Record identifiers from both datasets")
+	fmt.Println("  • is_match: Boolean indicating if records match")
+	fmt.Println("  • hamming_distance: Bit differences between Bloom filters")
+	fmt.Println("  • jaccard_similarity: Estimated similarity score (0.0-1.0)")
+	fmt.Println("  • match_score: Composite matching score")
+	fmt.Println("  • timestamp: When intersection was computed")
 }

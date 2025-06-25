@@ -6,10 +6,12 @@ package pprl
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"math/big"
+	mathrand "math/rand"
 )
 
 // MinHash holds the parameters and signature for a given Bloom filter.
@@ -38,6 +40,49 @@ func NewMinHash(m, s uint32) (*MinHash, error) {
 	for i := uint32(0); i < s; i++ {
 		a[i] = randomUint32(1, prime-1)
 		b[i] = randomUint32(0, prime-1)
+	}
+
+	// Initialize signature array with "max value" sentinel (prime).
+	sig := make([]uint32, s)
+	for i := range sig {
+		sig[i] = prime
+	}
+
+	return &MinHash{
+		s:         s,
+		a:         a,
+		b:         b,
+		prime:     prime,
+		signature: sig,
+	}, nil
+}
+
+// NewMinHashSeeded returns a MinHash with deterministic hash functions based on a seed.
+// This ensures both parties can generate identical MinHash instances for record linkage.
+func NewMinHashSeeded(m, s uint32, seed string) (*MinHash, error) {
+	if m == 0 || s == 0 {
+		return nil, errors.New("minhash: invalid parameters")
+	}
+	// Choose a prime > m. For simplicity, pick a hardcoded prime near 2^31.
+	const prime uint32 = 2147483647 // Mersenne prime (2^31 - 1); must exceed m.
+	if m >= prime {
+		return nil, errors.New("minhash: m too large for chosen prime")
+	}
+
+	// Use deterministic random generator based on seed
+	h := sha256.Sum256([]byte(seed))
+	var seedInt int64
+	for i := 0; i < 8; i++ {
+		seedInt = (seedInt << 8) | int64(h[i])
+	}
+	rng := mathrand.New(mathrand.NewSource(seedInt))
+
+	a := make([]uint32, s)
+	b := make([]uint32, s)
+	// Generate deterministic coefficients in [1..prime-1].
+	for i := uint32(0); i < s; i++ {
+		a[i] = uint32(rng.Int63n(int64(prime-2))) + 1 // [1, prime-1]
+		b[i] = uint32(rng.Int63n(int64(prime)))       // [0, prime-1]
 	}
 
 	// Initialize signature array with "max value" sentinel (prime).

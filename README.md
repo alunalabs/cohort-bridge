@@ -41,7 +41,11 @@ This system implements a complete pipeline for privacy-preserving record linkage
 
 ### Command Line Tools
 
-- **`cmd/demo/`** - Demonstration application with multiple modes
+- **`cmd/agent/`** - Interactive orchestrator with network communication
+- **`cmd/tokenize/`** - Privacy-preserving tokenization tool
+- **`cmd/intersect/`** - Record linkage and intersection finder
+- **`cmd/send/`** - Network communication for result sharing
+- **`cmd/validate/`** - Data validation and quality assessment
 
 ## 🚀 Quick Start
 
@@ -56,7 +60,55 @@ This system implements a complete pipeline for privacy-preserving record linkage
 git clone <repository-url>
 cd cohort-bridge
 go mod download
+
+# Build all tools (or use make if available)
+go build -o agent.exe ./cmd/agent
+go build -o tokenize.exe ./cmd/tokenize
+go build -o intersect.exe ./cmd/intersect
+go build -o send.exe ./cmd/send
+go build -o validate.exe ./cmd/validate
 ```
+
+## ✨ Interactive CLI Experience
+
+CohortBridge now features a beautiful, user-friendly interactive CLI powered by [promptui](https://github.com/manifoldco/promptui):
+
+### 🎯 Just Run the Agent
+```bash
+./agent.exe
+```
+
+**No arguments needed!** The agent will guide you through:
+- ✅ **Mode Selection** - Receiver, Sender, or Local Orchestration
+- ✅ **Config File Discovery** - Auto-detects and describes available configs
+- ✅ **Smart Validation** - Real-time input validation with helpful error messages
+- ✅ **Professional UI** - Arrow key navigation, emojis, and consistent styling
+
+### 🔐 Interactive Tokenization
+```bash
+./tokenize.exe -interactive
+```
+
+Features include:
+- 📁 **File path validation** - Ensures input files exist
+- 📝 **Format auto-detection** - Smart detection of CSV/JSON formats
+- ⚙️ **Advanced configuration** - Optional fine-tuning of Bloom filter parameters
+- 🎯 **Smart defaults** - Recommended settings for most use cases
+
+### 🔍 Enhanced Help System
+All tools now feature beautifully formatted help:
+```bash
+./intersect.exe -help
+./tokenize.exe -help
+./agent.exe -help
+```
+
+### 💡 Key Interactive Features
+- **Arrow Key Navigation** - Professional selection menus
+- **Real-time Validation** - Immediate feedback on invalid inputs
+- **Config Descriptions** - Automatic detection of config file types
+- **Error Recovery** - Graceful handling of user mistakes
+- **Visual Consistency** - Emoji-enhanced UI across all tools
 
 ### Initial Setup
 
@@ -81,6 +133,18 @@ go mod download
 - `config.example.yaml` - Basic single-party configuration
 - `config_example_party_a.yaml` - Party A in two-party matching
 - `config_example_party_b.yaml` - Party B in two-party matching
+- `config_a.yaml` / `config_b.yaml` - Simple two-party network demo configs
+
+### Running the Interactive Workflow
+
+```bash
+# Interactive mode - just run without arguments
+./agent.exe
+
+# Legacy command-line mode still supported
+./agent.exe -mode=receiver -config=config_a.yaml
+./agent.exe -mode=sender -config=config_b.yaml
+```
 
 ### Running the Demo
 

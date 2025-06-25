@@ -1,0 +1,13 @@
+database:
+  type: "csv"
+  filename: "data/patients_b_small2.csv"
+  fields: ["first_name", "last_name", "date_of_birth", "address"]
+
+peer:
+  host: "127.0.0.1"
+  port: 8080
+
+listen_port: 8081
+
+logging:
+  level: "info" 
