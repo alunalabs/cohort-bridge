@@ -43,7 +43,7 @@ Place your patient data files in the `data/` directory in CSV format with these 
 ### 3. Create Your Configuration
 
 **Option A: Use Our Web Interface (Recommended)**
-1. Visit [https://config.cohortbridge.io](URL_TBD) 
+1. Visit [TBD](URL_TBD) 
 2. Select your matching scenario (two-party, tokenized, secure, etc.)
 3. Configure your settings and download the config file
 4. Save as `config.yaml` in your project directory
@@ -182,8 +182,8 @@ The business logic is implemented in modular internal packages:
 
 ### Support Files
 
-- **Documentation**: `ARCHITECTURE.md`, `SECURITY_FEATURES.md`, `INSTALL.md`
-- **Scripts**: `scripts/install.ps1`, demo scripts for testing
+- (TBD) **Documentation**: `ARCHITECTURE.md`, `SECURITY_FEATURES.md`, `INSTALL.md`
+- (TBD) **Scripts**: `scripts/install.ps1`, demo scripts for testing
 - **Web Interface**: `web/` - Next.js configuration builder (optional)
 
 ## 🔐 Security Features
@@ -377,7 +377,7 @@ matching:
 - Kubernetes manifests for scalable deployment
 - Helm charts for easy configuration management
 
-## 📚 Documentation
+## 📚 Documentation  TBD
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed system architecture
 - **[SECURITY_FEATURES.md](SECURITY_FEATURES.md)** - Comprehensive security analysis  
@@ -385,7 +385,7 @@ matching:
 - **[STREAMING_README.md](STREAMING_README.md)** - Streaming and real-time processing
 - **Command-specific READMEs** in each `cmd/` directory
 
-## 🤝 Contributing
+## 🤝 Contributing  TBD
 
 We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
 - Code style and standards
@@ -399,7 +399,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 
 ## 📞 Support
 
-- **Documentation**: [https://docs.cohortbridge.io](URL_TBD)
+- **Documentation**: [TBD](URL_TBD)
 - **Issues**: [GitHub Issues](https://github.com/your-org/cohort-bridge/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-org/cohort-bridge/discussions)
-- **Security Issues**: Please report privately to [security@cohortbridge.io](mailto:security@cohortbridge.io) 
+- **Security Issues**: Please report privately to [admin@nerve.run](mailto:admin@nerve.run) 
