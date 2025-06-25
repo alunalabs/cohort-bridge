@@ -1,5 +1,7 @@
 # CohortBridge - Privacy-Preserving Record Linkage
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 > **⚠️ Work in Progress Notice**  
 > While CohortBridge's core functionality for privacy-preserving record linkage is implemented and working, some advanced features are still in development:
 > - **Secure Multi-Party Computation**: Garbled circuits and VOLE-based protocols are currently placeholders with simulated outputs
@@ -429,10 +431,6 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 - Testing requirements
 - Security review process
 - Documentation standards
-
-## 📄 License
-
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 
 ## 📞 Support

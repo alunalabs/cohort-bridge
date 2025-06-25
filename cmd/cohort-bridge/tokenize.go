@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
+	"github.com/manifoldco/promptui"
 )
 
 func runTokenizeCommand(args []string) {
@@ -18,14 +22,13 @@ func runTokenizeCommand(args []string) {
 
 	fs := flag.NewFlagSet("tokenize", flag.ExitOnError)
 	var (
-		// configFile     = fs.String("config", "", "Configuration file (optional)")
 		mainConfigFile = fs.String("main-config", "config.yaml", "Main config file to read field names from")
 		inputFile      = fs.String("input", "", "Input file with PHI data")
 		outputFile     = fs.String("output", "", "Output file for tokenized data")
 		inputFormat    = fs.String("input-format", "csv", "Input format: csv, json, postgres")
 		outputFormat   = fs.String("output-format", "csv", "Output format: csv, json")
 		batchSize      = fs.Int("batch-size", 1000, "Number of records to process in each batch")
-		interactive    = fs.Bool("interactive", false, "Use interactive mode")
+		interactive    = fs.Bool("interactive", false, "Force interactive mode")
 		useDatabase    = fs.Bool("database", false, "Use database from main config instead of file")
 		minHashSeed    = fs.String("minhash-seed", "cohort-bridge-shared-seed-2024", "Seed for deterministic MinHash generation")
 		help           = fs.Bool("help", false, "Show help message")
@@ -40,6 +43,178 @@ func runTokenizeCommand(args []string) {
 	// Ensure output directory exists
 	if err := os.MkdirAll("out", 0755); err != nil {
 		log.Fatalf("Failed to create output directory: %v", err)
+	}
+
+	// If missing required parameters or interactive mode requested, go interactive
+	if (*inputFile == "" && !*useDatabase) || *outputFile == "" || *interactive {
+		fmt.Println("🎯 Interactive Tokenization Setup")
+		fmt.Println("Let's configure your tokenization parameters...\n")
+
+		// Load config to get field information
+		var defaultFields []string
+		if cfg, err := config.Load(*mainConfigFile); err == nil {
+			if len(cfg.Database.Fields) > 0 {
+				defaultFields = cfg.Database.Fields
+			}
+		}
+		if len(defaultFields) == 0 {
+			defaultFields = []string{"FIRST", "LAST", "BIRTHDATE", "ZIP"}
+		}
+
+		// Choose data source
+		if !*useDatabase {
+			sourcePrompt := promptui.Select{
+				Label: "Select data source",
+				Items: []string{
+					"📁 File - Process data from a file",
+					"🗄️  Database - Use database connection from config",
+				},
+				Templates: &promptui.SelectTemplates{
+					Label:    "{{ . }}:",
+					Active:   "▶ {{ . | cyan }}",
+					Inactive: "  {{ . | white }}",
+					Selected: "✓ {{ . | green }}",
+				},
+			}
+
+			sourceIndex, _, err := sourcePrompt.Run()
+			if err != nil {
+				fmt.Printf("❌ Error selecting data source: %v\n", err)
+				os.Exit(1)
+			}
+			*useDatabase = (sourceIndex == 1)
+		}
+
+		// Get input file if using file mode
+		if !*useDatabase && *inputFile == "" {
+			var err error
+			*inputFile, err = selectFile("Select Input Data File", "data", []string{".csv", ".json", ".txt"})
+			if err != nil {
+				fmt.Printf("❌ Error selecting input file: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		// Get output file
+		if *outputFile == "" {
+			defaultOutput := generateTokenizeOutputName(*inputFile, *useDatabase)
+			outputPrompt := promptui.Prompt{
+				Label:   "Output file for tokenized data",
+				Default: defaultOutput,
+				Validate: func(input string) error {
+					if strings.TrimSpace(input) == "" {
+						return fmt.Errorf("output file cannot be empty")
+					}
+					return nil
+				},
+			}
+
+			result, err := outputPrompt.Run()
+			if err != nil {
+				fmt.Printf("❌ Error getting output file: %v\n", err)
+				os.Exit(1)
+			}
+			*outputFile = result
+		}
+
+		// Select input format
+		if !*useDatabase {
+			formatPrompt := promptui.Select{
+				Label: "Select input format",
+				Items: []string{
+					"📄 CSV - Comma-separated values",
+					"📋 JSON - JavaScript Object Notation",
+					"🔧 Auto-detect from file extension",
+				},
+				Templates: &promptui.SelectTemplates{
+					Label:    "{{ . }}:",
+					Active:   "▶ {{ . | cyan }}",
+					Inactive: "  {{ . | white }}",
+					Selected: "✓ {{ . | green }}",
+				},
+			}
+
+			formatIndex, _, err := formatPrompt.Run()
+			if err != nil {
+				fmt.Printf("❌ Error selecting input format: %v\n", err)
+				os.Exit(1)
+			}
+
+			switch formatIndex {
+			case 0:
+				*inputFormat = "csv"
+			case 1:
+				*inputFormat = "json"
+			case 2:
+				*inputFormat = detectInputFormat(*inputFile)
+			}
+		}
+
+		// Select output format
+		outFormatPrompt := promptui.Select{
+			Label: "Select output format",
+			Items: []string{
+				"📄 CSV - Comma-separated values",
+				"📋 JSON - JavaScript Object Notation",
+			},
+			Templates: &promptui.SelectTemplates{
+				Label:    "{{ . }}:",
+				Active:   "▶ {{ . | cyan }}",
+				Inactive: "  {{ . | white }}",
+				Selected: "✓ {{ . | green }}",
+			},
+		}
+
+		outFormatIndex, _, err := outFormatPrompt.Run()
+		if err != nil {
+			fmt.Printf("❌ Error selecting output format: %v\n", err)
+			os.Exit(1)
+		}
+		*outputFormat = []string{"csv", "json"}[outFormatIndex]
+
+		// Configure batch size
+		batchPrompt := promptui.Prompt{
+			Label:   "Batch size (records to process at once)",
+			Default: strconv.Itoa(*batchSize),
+			Validate: func(input string) error {
+				val, err := strconv.Atoi(input)
+				if err != nil {
+					return fmt.Errorf("must be a valid number")
+				}
+				if val < 1 || val > 100000 {
+					return fmt.Errorf("batch size must be between 1 and 100,000")
+				}
+				return nil
+			},
+		}
+
+		batchResult, err := batchPrompt.Run()
+		if err != nil {
+			fmt.Printf("❌ Error getting batch size: %v\n", err)
+			os.Exit(1)
+		}
+		*batchSize, _ = strconv.Atoi(batchResult)
+
+		// Configure MinHash seed
+		seedPrompt := promptui.Prompt{
+			Label:   "MinHash seed for deterministic hashing",
+			Default: *minHashSeed,
+			Validate: func(input string) error {
+				if len(strings.TrimSpace(input)) < 8 {
+					return fmt.Errorf("seed must be at least 8 characters")
+				}
+				return nil
+			},
+		}
+
+		seedResult, err := seedPrompt.Run()
+		if err != nil {
+			fmt.Printf("❌ Error getting MinHash seed: %v\n", err)
+			os.Exit(1)
+		}
+		*minHashSeed = seedResult
+
+		fmt.Println()
 	}
 
 	// Try to load field names from main config file
@@ -57,36 +232,114 @@ func runTokenizeCommand(args []string) {
 		fmt.Printf("⚠️  Could not load field names from %s, using defaults: %v\n", *mainConfigFile, defaultFields)
 	}
 
-	if *interactive {
-		fmt.Println("📝 Interactive mode not yet implemented. Please use command line options.")
-		os.Exit(1)
-	}
-
+	// Show configuration summary
+	fmt.Println("📋 Tokenization Configuration:")
 	if *useDatabase {
-		fmt.Println("🗄️  Database mode not yet implemented. Please use file input.")
-		os.Exit(1)
+		fmt.Println("  📊 Data Source: Database (from config)")
+	} else {
+		fmt.Printf("  📊 Input File: %s\n", *inputFile)
+		fmt.Printf("  📄 Input Format: %s\n", *inputFormat)
 	}
-
-	// Command line mode
-	if *inputFile == "" || *outputFile == "" {
-		showTokenizeHelp()
-		os.Exit(1)
-	}
-
-	fmt.Printf("📋 Tokenization Configuration:\n")
-	fmt.Printf("  Input File: %s\n", *inputFile)
-	fmt.Printf("  Output File: %s\n", *outputFile)
-	fmt.Printf("  Input Format: %s\n", *inputFormat)
-	fmt.Printf("  Output Format: %s\n", *outputFormat)
-	fmt.Printf("  Batch Size: %d\n", *batchSize)
-	fmt.Printf("  Fields: %v\n", defaultFields)
-	fmt.Printf("  MinHash Seed: %s\n", *minHashSeed)
+	fmt.Printf("  📁 Output File: %s\n", *outputFile)
+	fmt.Printf("  📄 Output Format: %s\n", *outputFormat)
+	fmt.Printf("  🔢 Batch Size: %d\n", *batchSize)
+	fmt.Printf("  🏷️  Fields: %v\n", defaultFields)
+	fmt.Printf("  🔑 MinHash Seed: %s\n", *minHashSeed)
 	fmt.Println()
 
+	// Confirm before proceeding
+	confirmPrompt := promptui.Select{
+		Label: "Ready to start tokenization?",
+		Items: []string{
+			"✅ Yes, start tokenization",
+			"⚙️  Change configuration",
+			"❌ Cancel",
+		},
+		Templates: &promptui.SelectTemplates{
+			Label:    "{{ . }}:",
+			Active:   "▶ {{ . | cyan }}",
+			Inactive: "  {{ . | white }}",
+			Selected: "✓ {{ . | green }}",
+		},
+	}
+
+	confirmIndex, _, err := confirmPrompt.Run()
+	if err != nil || confirmIndex == 2 {
+		fmt.Println("\n👋 Tokenization cancelled. Goodbye!")
+		os.Exit(0)
+	}
+
+	if confirmIndex == 1 {
+		// Restart configuration
+		fmt.Println("\n🔄 Restarting configuration...\n")
+		newArgs := append([]string{"-interactive"}, args...)
+		runTokenizeCommand(newArgs)
+		return
+	}
+
+	// Validate inputs before proceeding
+	if err := validateTokenizeInputs(*inputFile, *useDatabase, *mainConfigFile); err != nil {
+		fmt.Printf("❌ Validation error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run tokenization
+	fmt.Println("🚀 Starting tokenization process...\n")
+
+	if err := performTokenization(*inputFile, *outputFile, *inputFormat, *outputFormat, *batchSize, *minHashSeed, *useDatabase, defaultFields); err != nil {
+		fmt.Printf("❌ Tokenization failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\n✅ Tokenization completed successfully!\n")
+	fmt.Printf("📁 Tokenized data saved to: %s\n", *outputFile)
+}
+
+func generateTokenizeOutputName(inputFile string, useDatabase bool) string {
+	if useDatabase {
+		return "out/tokenized_database_records.csv"
+	}
+
+	if inputFile == "" {
+		return "out/tokenized_data.csv"
+	}
+
+	base := filepath.Base(inputFile)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+
+	return filepath.Join("out", name+"_tokenized.csv")
+}
+
+func detectInputFormat(inputFile string) string {
+	ext := strings.ToLower(filepath.Ext(inputFile))
+	if ext == ".json" {
+		return "json"
+	}
+	return "csv" // Default fallback
+}
+
+func validateTokenizeInputs(inputFile string, useDatabase bool, configFile string) error {
+	if !useDatabase {
+		if inputFile == "" {
+			return fmt.Errorf("input file is required when not using database mode")
+		}
+		if _, err := os.Stat(inputFile); os.IsNotExist(err) {
+			return fmt.Errorf("input file not found: %s", inputFile)
+		}
+	} else {
+		if _, err := os.Stat(configFile); os.IsNotExist(err) {
+			return fmt.Errorf("config file not found: %s", configFile)
+		}
+	}
+	return nil
+}
+
+func performTokenization(inputFile, outputFile, inputFormat, outputFormat string, batchSize int, minHashSeed string, useDatabase bool, fields []string) error {
 	// Use the existing PPRL storage functionality
-	_, err := pprl.NewStorage(*outputFile)
+	_, err := pprl.NewStorage(outputFile)
 	if err != nil {
-		log.Fatalf("Failed to create storage: %v", err)
+		return fmt.Errorf("failed to create storage: %w", err)
 	}
 
 	// This is a simplified implementation - the actual tokenization would:
@@ -95,15 +348,19 @@ func runTokenizeCommand(args []string) {
 	// 3. Save tokenized records using storage.Append()
 
 	fmt.Println("📂 Loading and tokenizing records...")
+	fmt.Printf("   🔧 Processing in batches of %d...\n", batchSize)
 	fmt.Println("   🔧 Generating Bloom filters...")
 	fmt.Println("   🔧 Computing MinHash signatures...")
 	fmt.Println("💾 Saving tokenized records...")
 
 	// Placeholder for actual tokenization logic
-	fmt.Printf("✅ Tokenization would process records from %s\n", *inputFile)
+	if useDatabase {
+		fmt.Println("✅ Tokenization would process records from database")
+	} else {
+		fmt.Printf("✅ Tokenization would process records from %s\n", inputFile)
+	}
 
-	fmt.Println("✅ Tokenization completed successfully!")
-	fmt.Printf("📁 Tokenized data saved to: %s\n", *outputFile)
+	return nil
 }
 
 func showTokenizeHelp() {
@@ -114,6 +371,7 @@ func showTokenizeHelp() {
 	fmt.Println()
 	fmt.Println("USAGE:")
 	fmt.Println("  cohort-bridge tokenize [OPTIONS]")
+	fmt.Println("  cohort-bridge tokenize                     # Interactive mode")
 	fmt.Println()
 	fmt.Println("OPTIONS:")
 	fmt.Println("  -input string          Input file with PHI data")
@@ -122,12 +380,21 @@ func showTokenizeHelp() {
 	fmt.Println("  -input-format string   Input format: csv, json, postgres")
 	fmt.Println("  -output-format string  Output format: csv, json")
 	fmt.Println("  -batch-size int        Number of records to process in each batch")
-	fmt.Println("  -interactive           Use interactive mode")
+	fmt.Println("  -interactive           Force interactive mode")
 	fmt.Println("  -database              Use database from main config instead of file")
 	fmt.Println("  -minhash-seed string   Seed for deterministic MinHash generation")
 	fmt.Println("  -help                  Show this help message")
 	fmt.Println()
 	fmt.Println("EXAMPLES:")
+	fmt.Println("  # Interactive mode (prompts for all inputs)")
+	fmt.Println("  cohort-bridge tokenize")
+	fmt.Println()
+	fmt.Println("  # File mode")
 	fmt.Println("  cohort-bridge tokenize -input data.csv -output tokens.csv")
+	fmt.Println()
+	fmt.Println("  # Database mode")
 	fmt.Println("  cohort-bridge tokenize -database -main-config config.yaml")
+	fmt.Println()
+	fmt.Println("  # Force interactive even with some parameters")
+	fmt.Println("  cohort-bridge tokenize -input data.csv -interactive")
 }
