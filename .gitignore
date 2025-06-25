@@ -63,9 +63,4 @@ temp-sender/
 *.sh
 
 # build files
-agent
-sende
-test
-tokenize
-validate
 *.exe
