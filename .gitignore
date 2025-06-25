@@ -13,12 +13,8 @@ logs/
 data/
 
 # Configuration files (keep examples only)
-config.yaml
-config2.yaml
-config_a.yaml
-config_b.yaml
-!config.example.yaml
-!config_example_*.yaml
+config*.yaml
+!config*.example.yaml
 
 # Go build cache and modules
 *.test
@@ -64,3 +60,12 @@ cmd/test
 test_cohort_bridge.sh
 temp-receiver/
 temp-sender/
+*.sh
+
+# build files
+agent
+sende
+test
+tokenize
+validate
+*.exe
