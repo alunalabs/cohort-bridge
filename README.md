@@ -1,6 +1,6 @@
 # CohortBridge - Privacy-Preserving Record Linkage
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **⚠️ Work in Progress Notice**  
 > While CohortBridge's core functionality for privacy-preserving record linkage is implemented and working, some advanced features are still in development:
