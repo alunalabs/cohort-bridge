@@ -46,7 +46,7 @@ func runIntersectCommand(args []string) {
 		// Get first dataset
 		if *dataset1 == "" {
 			var err error
-			*dataset1, err = selectFile("Select First Tokenized Dataset", "tokenized", []string{".csv", ".json"})
+			*dataset1, err = selectDataFile("Select First Tokenized Dataset", "tokenized", []string{".csv", ".json"})
 			if err != nil {
 				fmt.Printf("❌ Error selecting first dataset: %v\n", err)
 				os.Exit(1)
@@ -56,7 +56,7 @@ func runIntersectCommand(args []string) {
 		// Get second dataset
 		if *dataset2 == "" {
 			var err error
-			*dataset2, err = selectFile("Select Second Tokenized Dataset", "tokenized", []string{".csv", ".json"})
+			*dataset2, err = selectDataFile("Select Second Tokenized Dataset", "tokenized", []string{".csv", ".json"})
 			if err != nil {
 				fmt.Printf("❌ Error selecting second dataset: %v\n", err)
 				os.Exit(1)
@@ -148,6 +148,8 @@ func runIntersectCommand(args []string) {
 				Inactive: "  {{ . | white }}",
 				Selected: "✓ {{ . | green }}",
 			},
+			Size:     2,
+			HideHelp: true,
 		}
 
 		streamingIndex, _, err := streamingPrompt.Run()
@@ -213,6 +215,8 @@ func runIntersectCommand(args []string) {
 			Inactive: "  {{ . | white }}",
 			Selected: "✓ {{ . | green }}",
 		},
+		Size:     3,
+		HideHelp: true,
 	}
 
 	confirmIndex, _, err := confirmPrompt.Run()

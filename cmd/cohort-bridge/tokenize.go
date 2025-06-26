@@ -75,6 +75,8 @@ func runTokenizeCommand(args []string) {
 					Inactive: "  {{ . | white }}",
 					Selected: "✓ {{ . | green }}",
 				},
+				Size:     2,
+				HideHelp: true,
 			}
 
 			sourceIndex, _, err := sourcePrompt.Run()
@@ -88,7 +90,7 @@ func runTokenizeCommand(args []string) {
 		// Get input file if using file mode
 		if !*useDatabase && *inputFile == "" {
 			var err error
-			*inputFile, err = selectFile("Select Input Data File", "data", []string{".csv", ".json", ".txt"})
+			*inputFile, err = selectDataFile("Select Input Data File", "data", []string{".csv", ".json", ".txt"})
 			if err != nil {
 				fmt.Printf("❌ Error selecting input file: %v\n", err)
 				os.Exit(1)
@@ -132,6 +134,8 @@ func runTokenizeCommand(args []string) {
 					Inactive: "  {{ . | white }}",
 					Selected: "✓ {{ . | green }}",
 				},
+				Size:     3,
+				HideHelp: true,
 			}
 
 			formatIndex, _, err := formatPrompt.Run()
@@ -163,6 +167,8 @@ func runTokenizeCommand(args []string) {
 				Inactive: "  {{ . | white }}",
 				Selected: "✓ {{ . | green }}",
 			},
+			Size:     2,
+			HideHelp: true,
 		}
 
 		outFormatIndex, _, err := outFormatPrompt.Run()
@@ -261,6 +267,8 @@ func runTokenizeCommand(args []string) {
 			Inactive: "  {{ . | white }}",
 			Selected: "✓ {{ . | green }}",
 		},
+		Size:     3,
+		HideHelp: true,
 	}
 
 	confirmIndex, _, err := confirmPrompt.Run()
