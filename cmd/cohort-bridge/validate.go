@@ -50,7 +50,8 @@ func runValidateCommand(args []string) {
 		config2File     = fs.String("config2", "", "Configuration file for dataset 2 (Party B)")
 		groundTruthFile = fs.String("ground-truth", "", "Ground truth file with expected matches")
 		outputFile      = fs.String("output", "", "Output CSV file for validation report")
-		matchThreshold  = fs.Uint("match-threshold", 100, "Hamming distance threshold for matches")
+		matchThreshold  = fs.Uint("match-threshold", 20, "Hamming distance threshold for matches (default: 20)")
+		force           = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
 		verbose         = fs.Bool("verbose", false, "Verbose output with detailed analysis")
 		interactive     = fs.Bool("interactive", false, "Force interactive mode")
 		help            = fs.Bool("help", false, "Show help message")
@@ -65,7 +66,7 @@ func runValidateCommand(args []string) {
 	// If missing required parameters or interactive mode requested, go interactive
 	if *config1File == "" || *config2File == "" || *groundTruthFile == "" || *outputFile == "" || *interactive {
 		fmt.Println("🎯 Interactive Validation Setup")
-		fmt.Println("Let's configure your validation parameters...\n")
+		fmt.Println("Let's configure your validation parameters...")
 
 		// Get first configuration file
 		if *config1File == "" {
@@ -107,26 +108,26 @@ func runValidateCommand(args []string) {
 		fmt.Println("\n🎯 Matching Configuration")
 
 		thresholdChoice := promptForChoice("Select match threshold:", []string{
-			"🎯 100 - Default (recommended for good matches)",
-			"🔥 50 - Very strict matching",
-			"⚖️  150 - More lenient matching",
+			"🎯 20 - Default (recommended for good matches)",
+			"🔥 10 - Very strict matching",
+			"⚖️  30 - More lenient matching",
 			"🔧 Custom - Enter custom value",
 		})
 
 		switch thresholdChoice {
 		case 0:
-			*matchThreshold = 100
+			*matchThreshold = 20
 		case 1:
-			*matchThreshold = 50
+			*matchThreshold = 10
 		case 2:
-			*matchThreshold = 150
+			*matchThreshold = 30
 		case 3:
-			customResult := promptForInput("Enter custom Hamming distance threshold (0-500)", "100")
-			if val, err := strconv.ParseUint(customResult, 10, 32); err == nil && val <= 500 {
+			customResult := promptForInput("Enter custom Hamming distance threshold (0-100)", "20")
+			if val, err := strconv.ParseUint(customResult, 10, 32); err == nil && val <= 100 {
 				*matchThreshold = uint(val)
 			} else {
-				fmt.Println("⚠️  Invalid threshold, using default: 100")
-				*matchThreshold = 100
+				fmt.Println("⚠️  Invalid threshold, using default: 20")
+				*matchThreshold = 20
 			}
 		}
 
@@ -159,27 +160,31 @@ func runValidateCommand(args []string) {
 	}
 	fmt.Println()
 
-	// Only show confirmation prompt if in interactive mode
-	if *interactive || (*config1File == "" || *config2File == "" || *groundTruthFile == "") {
-		// Confirm before proceeding
-		confirmChoice := promptForChoice("Ready to start validation?", []string{
-			"✅ Yes, start validation",
-			"⚙️  Change configuration",
-			"❌ Cancel",
-		})
+	// Confirm before proceeding (unless force flag is set)
+	if !*force {
+		// Only show confirmation prompt if in interactive mode or missing required params
+		if *interactive || (*config1File == "" || *config2File == "" || *groundTruthFile == "") {
+			confirmChoice := promptForChoice("Ready to start validation?", []string{
+				"✅ Yes, start validation",
+				"⚙️  Change configuration",
+				"❌ Cancel",
+			})
 
-		if confirmChoice == 2 {
-			fmt.Println("\n👋 Validation cancelled. Goodbye!")
-			os.Exit(0)
-		}
+			if confirmChoice == 2 {
+				fmt.Println("\n👋 Validation cancelled. Goodbye!")
+				os.Exit(0)
+			}
 
-		if confirmChoice == 1 {
-			// Restart configuration
-			fmt.Println("\n🔄 Restarting configuration...\n")
-			newArgs := append([]string{"-interactive"}, args...)
-			runValidateCommand(newArgs)
-			return
+			if confirmChoice == 1 {
+				// Restart configuration
+				fmt.Println("\n🔄 Restarting configuration...")
+				newArgs := append([]string{"-interactive"}, args...)
+				runValidateCommand(newArgs)
+				return
+			}
 		}
+	} else {
+		fmt.Println("🚀 Starting validation process automatically (force mode)...")
 	}
 
 	// Validate inputs before proceeding
@@ -189,7 +194,7 @@ func runValidateCommand(args []string) {
 	}
 
 	// Run validation
-	fmt.Println("🚀 Starting validation process...\n")
+	fmt.Println("🚀 Starting validation process...")
 
 	if err := performValidation(*config1File, *config2File, *groundTruthFile, *outputFile, *matchThreshold, *verbose); err != nil {
 		fmt.Printf("❌ Validation failed: %v\n", err)
@@ -579,6 +584,7 @@ func showValidateHelp() {
 	fmt.Println("  -match-threshold      Hamming distance threshold for matches")
 	fmt.Println("  -verbose              Verbose output with detailed analysis")
 	fmt.Println("  -interactive          Force interactive mode")
+	fmt.Println("  -force                Skip confirmation prompts and run automatically")
 	fmt.Println("  -help                 Show this help message")
 	fmt.Println()
 	fmt.Println("EXAMPLES:")
@@ -588,6 +594,10 @@ func showValidateHelp() {
 	fmt.Println("  # Command line mode")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -verbose")
+	fmt.Println()
+	fmt.Println("  # Automatic mode (skip confirmations)")
+	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -force")
+	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -verbose -force")
 	fmt.Println()
 	fmt.Println("  # Force interactive even with some parameters")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -interactive")
@@ -662,10 +672,10 @@ func loadDataset(cfg *config.Config, datasetName string) ([]server.PatientRecord
 	var err error
 
 	if cfg.Database.IsTokenized {
-		fmt.Printf("   📁 Loading tokenized data from %s\n", cfg.Database.TokenizedFile)
-		records, err = server.LoadTokenizedRecords(cfg.Database.TokenizedFile)
+		fmt.Printf("   📁 Loading tokenized data from %s\n", cfg.Database.Filename)
+		records, err = server.LoadTokenizedRecords(cfg.Database.Filename, cfg.Database.IsEncrypted, cfg.Database.EncryptionKey, cfg.Database.EncryptionKeyFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load tokenized %s: %w", datasetName, err)
+			return nil, fmt.Errorf("failed to load tokenized records: %v", err)
 		}
 	} else {
 		fmt.Printf("   📁 Loading raw data from %s\n", cfg.Database.Filename)

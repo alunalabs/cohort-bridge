@@ -39,8 +39,8 @@ func RunAsSender(cfg *config.Config) {
 
 	if cfg.Database.IsTokenized {
 		// Load tokenized data
-		Info("Loading tokenized data from: %s", cfg.Database.TokenizedFile)
-		records, err = LoadTokenizedRecords(cfg.Database.TokenizedFile)
+		Info("Loading tokenized data from: %s", cfg.Database.Filename)
+		records, err = LoadTokenizedRecords(cfg.Database.Filename, cfg.Database.IsEncrypted, cfg.Database.EncryptionKey, cfg.Database.EncryptionKeyFile)
 		if err != nil {
 			Error("Failed to load tokenized records: %v", err)
 			return
@@ -317,12 +317,12 @@ func saveIntersectionResults(matches []*match.MatchResult, sessionID string) err
 	defer file.Close()
 
 	// Write CSV header
-	file.WriteString("Sender_ID,Receiver_ID,Match_Score,Hamming_Distance,Is_Match\n")
+	file.WriteString("Sender_ID,Receiver_ID,Match_Score,Hamming_Distance\n")
 
 	// Write match results
 	for _, match := range matches {
-		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d,%t\n",
-			match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch))
+		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d\n",
+			match.ID1, match.ID2, match.MatchScore, match.HammingDistance))
 	}
 
 	Info("Intersection results saved to: %s with %d matches", filename, len(matches))

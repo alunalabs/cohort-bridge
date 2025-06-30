@@ -23,13 +23,15 @@ type WorkflowConfig struct {
 	PreserveFiles  bool
 	VerboseLogging bool
 	WorkspaceDir   string
+	Force          bool
 }
 
 // runSenderWorkflow runs the sender-specific workflow with step-by-step confirmations
-func runSenderWorkflow(cfg *config.Config) {
+func runSenderWorkflow(cfg *config.Config, force bool) {
 	fmt.Println("📤 Starting PPRL Sender Workflow")
 	fmt.Println("==================================")
 	fmt.Printf("Target: %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
+	fmt.Println("🔒 Using encrypted tokenization for maximum security")
 	fmt.Println()
 
 	// Create workflow config with debug mode detection
@@ -38,6 +40,7 @@ func runSenderWorkflow(cfg *config.Config) {
 		PreserveFiles:  isDebugMode(),
 		VerboseLogging: isDebugMode(),
 		WorkspaceDir:   "temp-sender",
+		Force:          force,
 	}
 
 	if workflowCfg.DebugMode {
@@ -65,12 +68,16 @@ func runSenderWorkflow(cfg *config.Config) {
 	var tokenizedFile string
 	if cfg.Database.IsTokenized {
 		fmt.Println("📋 STEP 1: Using Pre-tokenized Data")
-		fmt.Printf("   ✓ Found tokenized data: %s\n", cfg.Database.TokenizedFile)
-		tokenizedFile = filepath.Join("..", cfg.Database.TokenizedFile)
+		fmt.Printf("   ✓ Found tokenized data: %s\n", cfg.Database.Filename)
+		if cfg.Database.IsEncrypted {
+			fmt.Println("   🔒 Data is encrypted - will be automatically decrypted during processing")
+		}
+		tokenizedFile = filepath.Join("..", cfg.Database.Filename)
 	} else {
-		fmt.Println("🔧 STEP 1: Tokenizing Patient Data")
+		fmt.Println("🔧 STEP 1: Tokenizing Patient Data with Encryption")
 		fmt.Printf("   Input file: %s\n", cfg.Database.Filename)
 		fmt.Printf("   Fields: %s\n", joinFields(cfg.Database.Fields))
+		fmt.Println("   🔒 Output will be encrypted with AES-256-GCM")
 		fmt.Println()
 
 		var err error
@@ -78,12 +85,12 @@ func runSenderWorkflow(cfg *config.Config) {
 		if err != nil {
 			log.Fatalf("❌ Tokenization failed: %v", err)
 		}
-		fmt.Printf("   ✅ Tokenization complete: %s\n", tokenizedFile)
+		fmt.Printf("   ✅ Encrypted tokenization complete: %s\n", tokenizedFile)
 	}
 
 	// Confirmation before network step
 	fmt.Println()
-	if !confirmStep("Ready to send tokens over network to receiver?") {
+	if !confirmStep("Ready to send tokens over network to receiver?", workflowCfg) {
 		fmt.Println("👋 Workflow cancelled by user")
 		return
 	}
@@ -103,7 +110,7 @@ func runSenderWorkflow(cfg *config.Config) {
 
 	// Confirmation before intersection step
 	fmt.Println()
-	if !confirmStep("Ready to receive intersection results?") {
+	if !confirmStep("Ready to receive intersection results?", workflowCfg) {
 		fmt.Println("👋 Workflow cancelled by user")
 		return
 	}
@@ -121,7 +128,7 @@ func runSenderWorkflow(cfg *config.Config) {
 
 	// Final confirmation
 	fmt.Println()
-	if !confirmStep("Ready to save final results?") {
+	if !confirmStep("Ready to save final results?", workflowCfg) {
 		fmt.Println("👋 Workflow cancelled by user")
 		return
 	}
@@ -143,10 +150,11 @@ func runSenderWorkflow(cfg *config.Config) {
 }
 
 // runReceiverWorkflow runs the receiver-specific workflow with step-by-step confirmations
-func runReceiverWorkflow(cfg *config.Config) {
+func runReceiverWorkflow(cfg *config.Config, force bool) {
 	fmt.Println("📥 Starting PPRL Receiver Workflow")
 	fmt.Println("==================================")
 	fmt.Printf("Listening on port: %d\n", cfg.ListenPort)
+	fmt.Println("🔒 Using encrypted tokenization for maximum security")
 	fmt.Println()
 
 	// Create workflow config with debug mode detection
@@ -155,6 +163,7 @@ func runReceiverWorkflow(cfg *config.Config) {
 		PreserveFiles:  isDebugMode(),
 		VerboseLogging: isDebugMode(),
 		WorkspaceDir:   "temp-receiver",
+		Force:          force,
 	}
 
 	if workflowCfg.DebugMode {
@@ -182,12 +191,16 @@ func runReceiverWorkflow(cfg *config.Config) {
 	var tokenizedFile string
 	if cfg.Database.IsTokenized {
 		fmt.Println("📋 STEP 1: Using Pre-tokenized Data")
-		fmt.Printf("   ✓ Found tokenized data: %s\n", cfg.Database.TokenizedFile)
-		tokenizedFile = filepath.Join("..", cfg.Database.TokenizedFile)
+		fmt.Printf("   ✓ Found tokenized data: %s\n", cfg.Database.Filename)
+		if strings.HasSuffix(cfg.Database.Filename, ".enc") {
+			fmt.Println("   🔒 Data is encrypted - will be automatically decrypted during processing")
+		}
+		tokenizedFile = filepath.Join("..", cfg.Database.Filename)
 	} else {
-		fmt.Println("🔧 STEP 1: Tokenizing Patient Data")
+		fmt.Println("🔧 STEP 1: Tokenizing Patient Data with Encryption")
 		fmt.Printf("   Input file: %s\n", cfg.Database.Filename)
 		fmt.Printf("   Fields: %s\n", joinFields(cfg.Database.Fields))
+		fmt.Println("   🔒 Output will be encrypted with AES-256-GCM")
 		fmt.Println()
 
 		var err error
@@ -195,12 +208,12 @@ func runReceiverWorkflow(cfg *config.Config) {
 		if err != nil {
 			log.Fatalf("❌ Tokenization failed: %v", err)
 		}
-		fmt.Printf("   ✅ Tokenization complete: %s\n", tokenizedFile)
+		fmt.Printf("   ✅ Encrypted tokenization complete: %s\n", tokenizedFile)
 	}
 
 	// Confirmation before network step
 	fmt.Println()
-	if !confirmStep("Ready to start network receiver and wait for sender?") {
+	if !confirmStep("Ready to start network receiver and wait for sender?", workflowCfg) {
 		fmt.Println("👋 Workflow cancelled by user")
 		return
 	}
@@ -220,7 +233,7 @@ func runReceiverWorkflow(cfg *config.Config) {
 
 	// Confirmation before intersection step
 	fmt.Println()
-	if !confirmStep("Ready to compute intersection?") {
+	if !confirmStep("Ready to compute intersection?", workflowCfg) {
 		fmt.Println("👋 Workflow cancelled by user")
 		return
 	}
@@ -238,7 +251,7 @@ func runReceiverWorkflow(cfg *config.Config) {
 
 	// Final confirmation
 	fmt.Println()
-	if !confirmStep("Ready to save final results and send back to sender?") {
+	if !confirmStep("Ready to save final results and send back to sender?", workflowCfg) {
 		fmt.Println("👋 Workflow cancelled by user")
 		return
 	}
@@ -260,7 +273,7 @@ func runReceiverWorkflow(cfg *config.Config) {
 }
 
 // runOrchestrationWorkflow runs the complete PPRL workflow
-func runOrchestrationWorkflow(cfg *config.Config) {
+func runOrchestrationWorkflow(cfg *config.Config, force bool) {
 	fmt.Println("🔄 Starting complete PPRL orchestration workflow")
 
 	workflowCfg := &WorkflowConfig{
@@ -268,6 +281,7 @@ func runOrchestrationWorkflow(cfg *config.Config) {
 		PreserveFiles:  isDebugMode(),
 		VerboseLogging: isDebugMode(),
 		WorkspaceDir:   "temp-orchestration",
+		Force:          force,
 	}
 
 	if workflowCfg.DebugMode {
@@ -320,31 +334,46 @@ func performTokenizationStreamStep(cfg *config.Config, workflowCfg *WorkflowConf
 
 	if cfg.Database.IsTokenized {
 		// Use existing tokenized data
-		tokenizedFile = filepath.Join("..", cfg.Database.TokenizedFile)
+		tokenizedFile = filepath.Join("..", cfg.Database.Filename)
 		if workflowCfg.VerboseLogging {
-			fmt.Printf("      Using existing tokenized data: %s\n", cfg.Database.TokenizedFile)
+			fmt.Printf("      Using existing tokenized data: %s\n", cfg.Database.Filename)
 		}
 	} else {
-		// Tokenize the data using streaming approach
-		tokenizedFile = "tokens/tokenized_data.csv"
+		// Tokenize the data using the new encryption-enabled tokenization
+		// Default to encrypted output for security
+		tokenizedFile = "tokens/tokenized_data.csv.enc"
 
-		// Use the tokenize command with streaming for large datasets
+		// Use the tokenize command with encryption enabled by default
 		tokenizeArgs := []string{
 			"-input", filepath.Join("..", cfg.Database.Filename),
 			"-output", tokenizedFile,
-			"-format", "csv",
-			"-fields", joinFields(cfg.Database.Fields),
+			"-main-config", filepath.Join("..", "config.yaml"), // Use config for field names
+			"-force", // Skip confirmations in workflow mode
 		}
 
 		if workflowCfg.VerboseLogging {
-			fmt.Printf("      Streaming tokenization: %s -> %s\n", cfg.Database.Filename, tokenizedFile)
+			fmt.Printf("      Encrypted tokenization: %s -> %s\n", cfg.Database.Filename, tokenizedFile)
 			fmt.Printf("      Fields: %s\n", joinFields(cfg.Database.Fields))
 		} else {
-			fmt.Printf("      Tokenizing %s...\n", cfg.Database.Filename)
+			fmt.Printf("      Tokenizing %s (encrypted)...\n", cfg.Database.Filename)
 		}
 
 		if err := runTokenizeCommandReal(tokenizeArgs, workflowCfg); err != nil {
 			return "", fmt.Errorf("tokenization failed: %v", err)
+		}
+
+		// Verify the encrypted file and its key were created
+		keyFile := strings.TrimSuffix(tokenizedFile, ".enc") + ".key"
+		if _, err := os.Stat(tokenizedFile); err != nil {
+			return "", fmt.Errorf("encrypted tokenized file not created: %v", err)
+		}
+		if _, err := os.Stat(keyFile); err != nil {
+			return "", fmt.Errorf("encryption key file not created: %v", err)
+		}
+
+		if workflowCfg.VerboseLogging {
+			fmt.Printf("      ✅ Encrypted tokenization complete: %s\n", tokenizedFile)
+			fmt.Printf("      🗝️  Encryption key: %s\n", keyFile)
 		}
 	}
 
@@ -365,7 +394,12 @@ func performSendTokensStep(cfg *config.Config, tokenizedFile string, workflowCfg
 	// Create a modified config for sender mode
 	senderCfg := *cfg
 	senderCfg.Database.IsTokenized = true
-	senderCfg.Database.TokenizedFile = tokenizedFile
+	senderCfg.Database.Filename = tokenizedFile
+
+	// Adjust encryption key file path if it's relative
+	if senderCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(senderCfg.Database.EncryptionKeyFile) {
+		senderCfg.Database.EncryptionKeyFile = filepath.Join("..", senderCfg.Database.EncryptionKeyFile)
+	}
 
 	// Run sender with intersection collection
 	if err := runSenderWithIntersection(&senderCfg, intersectionFile, workflowCfg); err != nil {
@@ -389,7 +423,12 @@ func performReceiveTokensStep(cfg *config.Config, tokenizedFile string, workflow
 	// Create a modified config for receiver mode
 	receiverCfg := *cfg
 	receiverCfg.Database.IsTokenized = true
-	receiverCfg.Database.TokenizedFile = tokenizedFile
+	receiverCfg.Database.Filename = tokenizedFile
+
+	// Adjust encryption key file path if it's relative
+	if receiverCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(receiverCfg.Database.EncryptionKeyFile) {
+		receiverCfg.Database.EncryptionKeyFile = filepath.Join("..", receiverCfg.Database.EncryptionKeyFile)
+	}
 
 	// Run receiver with intersection creation
 	if err := runReceiverWithIntersection(&receiverCfg, intersectionFile, workflowCfg); err != nil {
@@ -448,7 +487,12 @@ func performSaveIntersectionStep(intersectionFile string, workflowCfg *WorkflowC
 }
 
 // User confirmation helper function
-func confirmStep(message string) bool {
+func confirmStep(message string, workflowCfg *WorkflowConfig) bool {
+	if workflowCfg.Force {
+		fmt.Printf("🚀 %s (auto-confirmed with force flag)\n", message)
+		return true
+	}
+
 	options := []string{
 		"✅ Yes, continue",
 		"❌ Cancel workflow",
@@ -466,7 +510,12 @@ func performNetworkSendStep(cfg *config.Config, tokenizedFile string, workflowCf
 	// Create a modified config for network sending
 	senderCfg := *cfg
 	senderCfg.Database.IsTokenized = true
-	senderCfg.Database.TokenizedFile = tokenizedFile
+	senderCfg.Database.Filename = tokenizedFile
+
+	// Adjust encryption key file path if it's relative
+	if senderCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(senderCfg.Database.EncryptionKeyFile) {
+		senderCfg.Database.EncryptionKeyFile = filepath.Join("..", senderCfg.Database.EncryptionKeyFile)
+	}
 
 	fmt.Printf("      Attempting to connect to %s:%d...\n", senderCfg.Peer.Host, senderCfg.Peer.Port)
 	fmt.Println("      📡 Starting network send (this will BLOCK until receiver responds)...")
@@ -514,7 +563,12 @@ func performNetworkReceiveStep(cfg *config.Config, tokenizedFile string, workflo
 	// Create a modified config for network receiving
 	receiverCfg := *cfg
 	receiverCfg.Database.IsTokenized = true
-	receiverCfg.Database.TokenizedFile = tokenizedFile
+	receiverCfg.Database.Filename = tokenizedFile
+
+	// Adjust encryption key file path if it's relative
+	if receiverCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(receiverCfg.Database.EncryptionKeyFile) {
+		receiverCfg.Database.EncryptionKeyFile = filepath.Join("..", receiverCfg.Database.EncryptionKeyFile)
+	}
 
 	// Clear any existing output files before starting
 	outputFiles := []string{
@@ -635,9 +689,17 @@ func copyFile(src, dst string) error {
 }
 
 func runTokenizeCommandReal(args []string, workflowCfg *WorkflowConfig) error {
-	// For now, call the existing implementation but with real tokenization
-	// In a full implementation, this would call the actual tokenize command
-	return runTokenizeCommandSilent(args)
+	// Save current stdout to restore later
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	// Set args for tokenize command - this will call the actual tokenize command with encryption
+	os.Args = append([]string{"cohort-bridge", "tokenize"}, args...)
+
+	// Call the actual tokenize command directly
+	runTokenizeCommand(args)
+
+	return nil
 }
 
 func runSenderWithIntersection(cfg *config.Config, intersectionFile string, workflowCfg *WorkflowConfig) error {
@@ -960,6 +1022,7 @@ func runWorkflowsCommand(args []string) {
 		configFile   = fs.String("config", "", "Configuration file")
 		workflowType = fs.String("workflow", "", "Workflow type: sender, receiver, orchestration")
 		interactive  = fs.Bool("interactive", false, "Force interactive mode")
+		force        = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
 		help         = fs.Bool("help", false, "Show help message")
 	)
 	fs.Parse(args)
@@ -1013,26 +1076,30 @@ func runWorkflowsCommand(args []string) {
 	fmt.Printf("  ⚙️  Workflow Type: %s\n", *workflowType)
 	fmt.Println()
 
-	// Confirm before proceeding
-	confirmOptions := []string{
-		"✅ Yes, start workflow",
-		"⚙️  Change configuration",
-		"❌ Cancel",
-	}
+	// Confirm before proceeding (unless force flag is set)
+	if !*force {
+		confirmOptions := []string{
+			"✅ Yes, start workflow",
+			"⚙️  Change configuration",
+			"❌ Cancel",
+		}
 
-	confirmChoice := promptForChoice("Ready to start workflow?", confirmOptions)
+		confirmChoice := promptForChoice("Ready to start workflow?", confirmOptions)
 
-	if confirmChoice == 2 { // Cancel
-		fmt.Println("\n👋 Workflow cancelled. Goodbye!")
-		os.Exit(0)
-	}
+		if confirmChoice == 2 { // Cancel
+			fmt.Println("\n👋 Workflow cancelled. Goodbye!")
+			os.Exit(0)
+		}
 
-	if confirmChoice == 1 { // Change configuration
-		// Restart configuration
-		fmt.Println("\n🔄 Restarting configuration...\n")
-		newArgs := append([]string{"-interactive"}, args...)
-		runWorkflowsCommand(newArgs)
-		return
+		if confirmChoice == 1 { // Change configuration
+			// Restart configuration
+			fmt.Println("\n🔄 Restarting configuration...\n")
+			newArgs := append([]string{"-interactive"}, args...)
+			runWorkflowsCommand(newArgs)
+			return
+		}
+	} else {
+		fmt.Println("🚀 Starting workflow automatically (force mode)...")
 	}
 
 	// Load configuration
@@ -1046,11 +1113,11 @@ func runWorkflowsCommand(args []string) {
 
 	switch *workflowType {
 	case "sender":
-		runSenderWorkflow(cfg)
+		runSenderWorkflow(cfg, *force)
 	case "receiver":
-		runReceiverWorkflow(cfg)
+		runReceiverWorkflow(cfg, *force)
 	case "orchestration":
-		runOrchestrationWorkflow(cfg)
+		runOrchestrationWorkflow(cfg, *force)
 	default:
 		fmt.Printf("❌ Unknown workflow type: %s\n", *workflowType)
 		os.Exit(1)
@@ -1071,6 +1138,7 @@ func showWorkflowsHelp() {
 	fmt.Println("  -config string     Configuration file")
 	fmt.Println("  -workflow string   Workflow type: sender, receiver, orchestration")
 	fmt.Println("  -interactive       Force interactive mode")
+	fmt.Println("  -force             Skip confirmation prompts and run automatically")
 	fmt.Println("  -help              Show this help message")
 	fmt.Println()
 	fmt.Println("WORKFLOW TYPES:")
@@ -1085,6 +1153,10 @@ func showWorkflowsHelp() {
 	fmt.Println("  # Command line mode")
 	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow sender")
 	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow orchestration")
+	fmt.Println()
+	fmt.Println("  # Automatic mode (skip confirmations)")
+	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow sender -force")
+	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow receiver -force")
 	fmt.Println()
 	fmt.Println("  # Force interactive even with some parameters")
 	fmt.Println("  cohort-bridge workflows -config config.yaml -interactive")

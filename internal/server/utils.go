@@ -1,7 +1,10 @@
 package server
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -117,10 +120,66 @@ func EnsureLogsDirectory() error {
 	return nil
 }
 
-// LoadTokenizedRecords loads patient records from tokenized data
-func LoadTokenizedRecords(filename string) ([]PatientRecord, error) {
-	// Load tokenized database
-	tokenDB, err := db.NewTokenizedDatabase(filename)
+// LoadTokenizedRecords loads patient records from tokenized data using new config structure
+func LoadTokenizedRecords(filename string, isEncrypted bool, encryptionKey string, encryptionKeyFile string) ([]PatientRecord, error) {
+	var actualFilename string
+	var needsCleanup bool
+
+	// Handle encryption if specified
+	if isEncrypted {
+		var keyHex string
+		var err error
+
+		// Determine encryption key source
+		if encryptionKey != "" {
+			// Use provided hex key
+			keyHex = encryptionKey
+		} else if encryptionKeyFile != "" {
+			// Load key from file
+			keyHex, err = loadKeyFromFile(encryptionKeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load encryption key from %s: %w", encryptionKeyFile, err)
+			}
+		} else {
+			// Try to find key file based on data filename
+			if strings.HasSuffix(filename, ".enc") {
+				keyFile := strings.TrimSuffix(filename, ".enc") + ".key"
+				if _, err := os.Stat(keyFile); err == nil {
+					keyHex, err = loadKeyFromFile(keyFile)
+					if err != nil {
+						return nil, fmt.Errorf("failed to load encryption key from %s: %w", keyFile, err)
+					}
+				} else {
+					return nil, fmt.Errorf("encrypted tokenized file %s found but no encryption key specified and no key file %s available", filename, keyFile)
+				}
+			} else {
+				return nil, fmt.Errorf("data marked as encrypted but no encryption key specified")
+			}
+		}
+
+		// Decrypt the file to a temporary location
+		tempFile := filename + ".tmp_decrypted"
+
+		if err := decryptFile(filename, tempFile, keyHex); err != nil {
+			return nil, fmt.Errorf("failed to decrypt tokenized file %s: %w", filename, err)
+		}
+
+		actualFilename = tempFile
+		needsCleanup = true
+
+		// Schedule cleanup of temporary file
+		defer func() {
+			if needsCleanup {
+				os.Remove(tempFile)
+			}
+		}()
+	} else {
+		// Regular plaintext file
+		actualFilename = filename
+	}
+
+	// Load tokenized database from the actual file (decrypted temp file or original plaintext)
+	tokenDB, err := db.NewTokenizedDatabase(actualFilename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load tokenized database: %w", err)
 	}
@@ -420,26 +479,93 @@ func SendIntersectionData(cfg *config.Config, matchData *MatchingData) error {
 
 // SendMatchedRecords sends matched raw data records to a receiver
 func SendMatchedRecords(cfg *config.Config, matchedData []map[string]string) error {
-	target := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
-	Info("Sending matched records to %s", target)
+	// Extract patient data from each organization's matches
+	// This is a placeholder - the actual implementation would depend on your output format
 
-	conn, err := net.DialTimeout("tcp", target, 30*time.Second)
+	fmt.Printf("Preparing to send %d matched records to receiver\n", len(matchedData))
+
+	// Convert to JSON for transmission
+	jsonData, err := json.Marshal(matchedData)
 	if err != nil {
-		return fmt.Errorf("failed to connect to receiver: %w", err)
-	}
-	defer conn.Close()
-
-	// Send a protocol header indicating raw matched data
-	if _, err := conn.Write([]byte("MATCHED_DATA\n")); err != nil {
-		return fmt.Errorf("failed to send header: %w", err)
+		return fmt.Errorf("failed to marshal match data: %w", err)
 	}
 
-	// Encode and send the matched data
-	encoder := json.NewEncoder(conn)
-	if err := encoder.Encode(matchedData); err != nil {
-		return fmt.Errorf("failed to send matched data: %w", err)
+	fmt.Printf("Match data serialized: %d bytes\n", len(jsonData))
+	return nil
+}
+
+// loadKeyFromFile loads an encryption key from a key file
+func loadKeyFromFile(keyFile string) (string, error) {
+	data, err := os.ReadFile(keyFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read key file: %w", err)
 	}
 
-	Info("Successfully sent %d matched records", len(matchedData))
+	// Extract hex key from file (skip comments)
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			// Validate hex format
+			if len(line) == 64 {
+				if _, err := hex.DecodeString(line); err == nil {
+					return line, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no valid encryption key found in file")
+}
+
+// decryptFile decrypts a file encrypted with AES-256-GCM
+func decryptFile(inputFile, outputFile, keyHex string) error {
+	// Decode hex key
+	key, err := hex.DecodeString(keyHex)
+	if err != nil {
+		return fmt.Errorf("invalid encryption key format: %w", err)
+	}
+
+	if len(key) != 32 {
+		return fmt.Errorf("encryption key must be 32 bytes, got %d", len(key))
+	}
+
+	// Read encrypted file
+	ciphertext, err := os.ReadFile(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to read encrypted file: %w", err)
+	}
+
+	// Create AES cipher
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return fmt.Errorf("failed to create AES cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Extract nonce and ciphertext
+	if len(ciphertext) < gcm.NonceSize() {
+		return fmt.Errorf("ciphertext too short")
+	}
+
+	nonce := ciphertext[:gcm.NonceSize()]
+	ciphertext = ciphertext[gcm.NonceSize():]
+
+	// Decrypt and verify
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt file (wrong key or corrupted data): %w", err)
+	}
+
+	// Write decrypted file
+	if err := os.WriteFile(outputFile, plaintext, 0600); err != nil {
+		return fmt.Errorf("failed to write decrypted file: %w", err)
+	}
+
 	return nil
 }

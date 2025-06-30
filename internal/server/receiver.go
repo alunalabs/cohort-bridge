@@ -114,8 +114,8 @@ func RunAsReceiver(cfg *config.Config) {
 
 	if cfg.Database.IsTokenized {
 		// Load tokenized data
-		Info("Loading tokenized data from: %s", cfg.Database.TokenizedFile)
-		records, err = LoadTokenizedRecords(cfg.Database.TokenizedFile)
+		Info("Loading tokenized data from: %s", cfg.Database.Filename)
+		records, err = LoadTokenizedRecords(cfg.Database.Filename, cfg.Database.IsEncrypted, cfg.Database.EncryptionKey, cfg.Database.EncryptionKeyFile)
 		if err != nil {
 			Error("Failed to load tokenized records: %v", err)
 			return
@@ -378,7 +378,7 @@ func handleMatchingRequest(encoder *json.Encoder, msg MatchingMessage, pprlRecor
 
 	// Perform fuzzy matching
 	startTime := time.Now()
-	matchResults := performFuzzyMatching(pprlRecords, senderMatching, connID)
+	matchResults := performFuzzyMatching(pprlRecords, senderMatching, cfg, connID)
 	matchDuration := time.Since(startTime)
 
 	Info("Fuzzy matching completed in %v, found %d matches for connection %s",
@@ -451,14 +451,14 @@ func shouldUseStreamingApproach(pprlRecords []*pprl.Record, senderMatching Match
 }
 
 // performFuzzyMatching implements the core matching algorithm
-func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingData, connID string) []*match.MatchResult {
+func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingData, cfg *config.Config, connID string) []*match.MatchResult {
 	var matchResults []*match.MatchResult
 
-	// Use the SAME proven thresholds as validate command - much more permissive
+	// Use configurable thresholds from config (with proper defaults)
 	fuzzyConfig := &match.FuzzyMatchConfig{
-		HammingThreshold:  100, // Same as validate command default
-		JaccardThreshold:  0.5, // More permissive Jaccard threshold
-		UseSecureProtocol: false,
+		HammingThreshold:  cfg.Matching.HammingThreshold, // Use config value (default 20)
+		JaccardThreshold:  cfg.Matching.JaccardThreshold, // Use config value (default 0.7)
+		UseSecureProtocol: cfg.Matching.UseSecureProtocol,
 	}
 
 	totalComparisons := 0
@@ -590,12 +590,12 @@ func saveResultsToCSV(matches []*match.MatchResult, filename string) {
 	defer file.Close()
 
 	// Write CSV header
-	file.WriteString("Receiver_ID,Sender_ID,Match_Score,Hamming_Distance,Is_Match\n")
+	file.WriteString("Receiver_ID,Sender_ID,Match_Score,Hamming_Distance\n")
 
 	// Write match results
 	for _, match := range matches {
-		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d,%t\n",
-			match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch))
+		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d\n",
+			match.ID1, match.ID2, match.MatchScore, match.HammingDistance))
 	}
 
 	Info("Basic results saved to: %s with %d records", filename, len(matches))
@@ -615,7 +615,7 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 	for _, field := range fields {
 		header += fmt.Sprintf(",Receiver_%s", strings.Title(field))
 	}
-	header += ",Sender_ID,Match_Score,Hamming_Distance,Is_Match\n"
+	header += ",Sender_ID,Match_Score,Hamming_Distance\n"
 
 	// Write CSV header
 	file.WriteString(header)
@@ -646,8 +646,8 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 					row += ","
 				}
 			}
-			row += fmt.Sprintf(",%s,%.3f,%d,%t\n",
-				match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch)
+			row += fmt.Sprintf(",%s,%.3f,%d\n",
+				match.ID2, match.MatchScore, match.HammingDistance)
 
 			file.WriteString(row)
 		} else {
@@ -656,8 +656,8 @@ func saveMatchDetailsToCSV(matches []*match.MatchResult, filename string, csvDB 
 			for range fields {
 				row += ","
 			}
-			row += fmt.Sprintf(",%s,%.3f,%d,%t\n",
-				match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch)
+			row += fmt.Sprintf(",%s,%.3f,%d\n",
+				match.ID2, match.MatchScore, match.HammingDistance)
 
 			file.WriteString(row)
 		}
@@ -677,14 +677,14 @@ func performStreamingFuzzyMatching(
 
 	Info("Starting streaming fuzzy matching for connection %s", connID)
 
-	// Create streaming configuration with SAME thresholds as validate command
+	// Create streaming configuration with configurable thresholds from config
 	streamConfig := &StreamingConfig{
 		BatchSize:         1000, // Process 1000 records at a time
 		MaxMemoryMB:       256,  // Limit memory usage to 256MB
 		EnableProgressLog: true,
 		WriteBufferSize:   100,
-		HammingThreshold:  100, // SAME as validate command - much more permissive
-		JaccardThreshold:  0.5, // More permissive Jaccard threshold
+		HammingThreshold:  cfg.Matching.HammingThreshold, // Use config value (default 20)
+		JaccardThreshold:  cfg.Matching.JaccardThreshold, // Use config value (default 0.7)
 	}
 
 	// Check if we should use smaller batches for memory constraints

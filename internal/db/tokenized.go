@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
@@ -45,13 +46,30 @@ func (db *TokenizedDatabase) load() error {
 	}
 	defer file.Close()
 
-	// Detect file format by extension
-	if db.filename[len(db.filename)-5:] == ".json" {
+	// Detect file format by extension or content
+	filename := db.filename
+	if strings.HasSuffix(filename, ".json") {
 		return db.loadJSON(file)
-	} else if db.filename[len(db.filename)-4:] == ".csv" {
+	} else if strings.HasSuffix(filename, ".csv") || strings.Contains(filename, "_decrypted") {
+		// Handle .csv files and temporary decrypted files
 		return db.loadCSV(file)
 	} else {
-		return fmt.Errorf("unsupported file format: %s (use .json or .csv)", db.filename)
+		// Try to detect format by reading first few bytes
+		file.Seek(0, 0) // Reset to beginning
+		buffer := make([]byte, 100)
+		n, _ := file.Read(buffer)
+		content := string(buffer[:n])
+
+		file.Seek(0, 0) // Reset to beginning again
+
+		// Check if it looks like CSV (has commas and typical CSV headers)
+		if strings.Contains(content, "id,bloom_filter,minhash") || strings.Contains(content, ",") {
+			return db.loadCSV(file)
+		} else if strings.Contains(content, "{") || strings.Contains(content, "[") {
+			return db.loadJSON(file)
+		} else {
+			return fmt.Errorf("unsupported file format: %s (could not detect CSV or JSON format)", db.filename)
+		}
 	}
 }
 

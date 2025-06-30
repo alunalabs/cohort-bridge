@@ -16,12 +16,19 @@ type Config struct {
 		Password          string   `yaml:"password"`
 		DBName            string   `yaml:"dbname"`
 		Table             string   `yaml:"table"`
-		Filename          string   `yaml:"filename"`
-		Fields            []string `yaml:"fields"`
+		Filename          string   `yaml:"filename"` // Path to data file (raw or tokenized)
+		Fields            []string `yaml:"fields"`   // Only needed when is_tokenized=false
 		RandomBitsPercent float64  `yaml:"random_bits_percent"`
-		IsTokenized       bool     `yaml:"is_tokenized"`   // Whether the data is already tokenized
-		TokenizedFile     string   `yaml:"tokenized_file"` // Path to tokenized data file (JSON/CSV)
+		IsTokenized       bool     `yaml:"is_tokenized"`        // Whether the data is already tokenized
+		IsEncrypted       bool     `yaml:"is_encrypted"`        // Whether tokenized data is encrypted
+		EncryptionKey     string   `yaml:"encryption_key"`      // Hex encryption key (optional)
+		EncryptionKeyFile string   `yaml:"encryption_key_file"` // Path to key file (optional)
 	} `yaml:"database"`
+	Matching struct {
+		HammingThreshold  uint32  `yaml:"hamming_threshold"`   // Hamming distance threshold for matches
+		JaccardThreshold  float64 `yaml:"jaccard_threshold"`   // Jaccard similarity threshold
+		UseSecureProtocol bool    `yaml:"use_secure_protocol"` // Whether to use secure protocol
+	} `yaml:"matching"`
 	Peer struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
@@ -49,23 +56,22 @@ type Config struct {
 		EnableAudit  bool   `yaml:"enable_audit"`  // Enable audit logging for security events
 		AuditFile    string `yaml:"audit_file"`    // Audit log file path
 	} `yaml:"logging"`
-	Streaming  *StreamingConfig `yaml:"streaming,omitempty"` // Streaming configuration for large datasets
-	ListenPort int              `yaml:"listen_port"`
-	PrivateKey string           `yaml:"private_key"`
-	PublicKey  string           `yaml:"public_key"`
-}
-
-// StreamingConfig defines configuration for memory-efficient streaming operations
-type StreamingConfig struct {
-	Enabled           bool `yaml:"enabled"`             // Whether streaming mode is enabled
-	BatchSize         int  `yaml:"batch_size"`          // Number of records to process per batch
-	MaxMemoryMB       int  `yaml:"max_memory_mb"`       // Maximum memory usage in MB
-	EnableProgressLog bool `yaml:"enable_progress_log"` // Whether to log batch progress
-	WriteBufferSize   int  `yaml:"write_buffer_size"`   // Buffer size for writing results
+	ListenPort int    `yaml:"listen_port"`
+	PrivateKey string `yaml:"private_key"`
+	PublicKey  string `yaml:"public_key"`
 }
 
 // SetDefaults sets reasonable default values for new configuration fields
 func (c *Config) SetDefaults() {
+	// Matching defaults (IMPORTANT: These should be strict for good precision/recall)
+	if c.Matching.HammingThreshold == 0 {
+		c.Matching.HammingThreshold = 20 // Strict threshold for good matches
+	}
+	if c.Matching.JaccardThreshold == 0 {
+		c.Matching.JaccardThreshold = 0.7 // High Jaccard threshold
+	}
+	// UseSecureProtocol defaults to false unless explicitly set
+
 	// Security defaults
 	if len(c.Security.AllowedIPs) == 0 {
 		c.Security.AllowedIPs = []string{"127.0.0.1", "::1"} // localhost only by default
@@ -106,20 +112,6 @@ func (c *Config) SetDefaults() {
 	}
 	if c.Logging.MaxAge == 0 {
 		c.Logging.MaxAge = 30 // 30 days
-	}
-
-	// Streaming defaults (only set if streaming is enabled)
-	if c.Streaming != nil && c.Streaming.Enabled {
-		if c.Streaming.BatchSize == 0 {
-			c.Streaming.BatchSize = 1000 // 1000 records per batch
-		}
-		if c.Streaming.MaxMemoryMB == 0 {
-			c.Streaming.MaxMemoryMB = 256 // 256MB max memory
-		}
-		if c.Streaming.WriteBufferSize == 0 {
-			c.Streaming.WriteBufferSize = 100 // 100 results buffered
-		}
-		// EnableProgressLog defaults to false unless explicitly set
 	}
 }
 

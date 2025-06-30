@@ -148,7 +148,7 @@ func NewMatchResultWriter(timestamp, connID string) (*MatchResultWriter, error) 
 	writer := csv.NewWriter(csvFile)
 
 	// Write CSV header
-	header := []string{"Receiver_ID", "Sender_ID", "Match_Score", "Hamming_Distance", "Is_Match", "Timestamp"}
+	header := []string{"Receiver_ID", "Sender_ID", "Match_Score", "Hamming_Distance", "Timestamp"}
 	if err := writer.Write(header); err != nil {
 		csvFile.Close()
 		return nil, fmt.Errorf("failed to write CSV header: %w", err)
@@ -189,7 +189,6 @@ func (w *MatchResultWriter) WriteMatch(result *match.MatchResult) error {
 		result.ID2,
 		fmt.Sprintf("%.6f", result.MatchScore),
 		fmt.Sprintf("%d", result.HammingDistance),
-		fmt.Sprintf("%t", result.IsMatch),
 		timestamp,
 	}
 
@@ -218,7 +217,6 @@ func (w *MatchResultWriter) WriteMatch(result *match.MatchResult) error {
 		"sender_id":        result.ID2,
 		"match_score":      result.MatchScore,
 		"hamming_distance": result.HammingDistance,
-		"is_match":         result.IsMatch,
 		"timestamp":        timestamp,
 	}
 
