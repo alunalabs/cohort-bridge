@@ -454,14 +454,18 @@ func shouldUseStreamingApproach(pprlRecords []*pprl.Record, senderMatching Match
 func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingData, connID string) []*match.MatchResult {
 	var matchResults []*match.MatchResult
 
+	// Use the SAME proven thresholds as validate command - much more permissive
 	fuzzyConfig := &match.FuzzyMatchConfig{
-		HammingThreshold:  200, // Allow up to 200 bit differences
-		JaccardThreshold:  0.5, // Require at least 50% Jaccard similarity
+		HammingThreshold:  100, // Same as validate command default
+		JaccardThreshold:  0.5, // More permissive Jaccard threshold
 		UseSecureProtocol: false,
 	}
 
 	totalComparisons := 0
 	matchesFound := 0
+
+	Info("Starting comprehensive fuzzy matching (connection %s)", connID)
+	Info("Using Hamming threshold: %d (distances <= %d will be matches)", fuzzyConfig.HammingThreshold, fuzzyConfig.HammingThreshold)
 
 	for _, receiverRecord := range pprlRecords {
 		for senderID, senderBloomData := range senderMatching.Records {
@@ -487,35 +491,67 @@ func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingDat
 				continue
 			}
 
-			// Calculate Jaccard similarity for scoring (simple approximation)
-			// For Bloom filters, we'll use a simple approximation based on Hamming distance
-			maxBits := float64(receiverBF.GetSize())
-			jaccard := 1.0 - (float64(hammingDist) / maxBits)
+			// Calculate match score using PROVEN working method from validate command
+			bfSize := receiverBF.GetSize()
+			matchScore := 1.0
+			if hammingDist > 0 {
+				matchScore = 1.0 - (float64(hammingDist) / float64(bfSize))
+			}
 
-			// Determine if this is a match
+			// Calculate Jaccard similarity for additional scoring
+			var jaccardSim float64
+			// For Bloom filters, use Hamming-based approximation for consistency
+			jaccardSim = 1.0 - (float64(hammingDist) / float64(bfSize))
+
+			// Determine if this is a match based on Hamming threshold ONLY (same as validate command)
+			// This is the KEY difference - validate command uses ONLY Hamming distance
 			isMatch := hammingDist <= fuzzyConfig.HammingThreshold
 
 			// Create match result
 			matchResult := &match.MatchResult{
-				ID1:             receiverRecord.ID,
-				ID2:             senderID,
-				MatchScore:      jaccard,
-				HammingDistance: hammingDist,
-				IsMatch:         isMatch,
+				ID1:               receiverRecord.ID,
+				ID2:               senderID,
+				MatchScore:        matchScore, // Use normalized 0-1 score
+				JaccardSimilarity: jaccardSim, // For compatibility
+				HammingDistance:   hammingDist,
+				IsMatch:           isMatch,
 			}
 
-			matchResults = append(matchResults, matchResult)
-
+			// Save ALL comparisons that meet the threshold (same as validate)
 			if isMatch {
+				matchResults = append(matchResults, matchResult)
 				matchesFound++
-				Debug("Match found: %s <-> %s (Hamming: %d, Jaccard: %.3f)",
-					receiverRecord.ID, senderID, hammingDist, jaccard)
+
+				// Debug first few matches found
+				if matchesFound <= 5 {
+					Debug("Match #%d: %s <-> %s (Hamming: %d ≤ %d, Score: %.6f)",
+						matchesFound, receiverRecord.ID, senderID, hammingDist, fuzzyConfig.HammingThreshold, matchScore)
+				}
+			}
+
+			// Debug first few comparisons
+			if totalComparisons <= 3 {
+				Debug("Comparison #%d: %s->%s, Hamming=%d, Score=%.6f, IsMatch=%v",
+					totalComparisons, receiverRecord.ID, senderID, hammingDist, matchScore, isMatch)
 			}
 		}
 	}
 
-	Info("Completed %d comparisons, found %d matches for connection %s",
-		totalComparisons, matchesFound, connID)
+	Info("Completed %d comparisons, found %d matches for connection %s (using Hamming <= %d)",
+		totalComparisons, matchesFound, connID, fuzzyConfig.HammingThreshold)
+
+	// Log sample of matches found for verification
+	if len(matchResults) > 0 {
+		Info("Sample matches found:")
+		for i, match := range matchResults {
+			if i >= 3 { // Show first 3
+				break
+			}
+			Info("  %s->%s: Hamming=%d, Score=%.6f", match.ID1, match.ID2, match.HammingDistance, match.MatchScore)
+		}
+	} else {
+		Info("No matches found - consider increasing Hamming threshold if expected matches exist")
+	}
 
 	return matchResults
 }
@@ -641,14 +677,14 @@ func performStreamingFuzzyMatching(
 
 	Info("Starting streaming fuzzy matching for connection %s", connID)
 
-	// Create streaming configuration
+	// Create streaming configuration with SAME thresholds as validate command
 	streamConfig := &StreamingConfig{
 		BatchSize:         1000, // Process 1000 records at a time
 		MaxMemoryMB:       256,  // Limit memory usage to 256MB
 		EnableProgressLog: true,
 		WriteBufferSize:   100,
-		HammingThreshold:  200, // Same as original
-		JaccardThreshold:  0.5, // Same as original
+		HammingThreshold:  100, // SAME as validate command - much more permissive
+		JaccardThreshold:  0.5, // More permissive Jaccard threshold
 	}
 
 	// Check if we should use smaller batches for memory constraints

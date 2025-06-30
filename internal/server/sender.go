@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
@@ -252,7 +253,7 @@ func sendMatchingRequest(encoder *json.Encoder, records []PatientRecord, session
 	return nil
 }
 
-// processResults processes and displays the matching results
+// processResults processes and saves the matching results
 func processResults(resultsMessage MatchingMessage, recordCount int, sessionID string) error {
 	Info("Processing results for session %s", sessionID)
 
@@ -263,38 +264,28 @@ func processResults(resultsMessage MatchingMessage, recordCount int, sessionID s
 		return fmt.Errorf("failed to parse results: %w", err)
 	}
 
-	// Display results
-	fmt.Println("\n🎯 Matching Results:")
-	fmt.Println("==================")
-
-	fmt.Printf("📈 Statistics:\n")
-	fmt.Printf("   Records processed: %d\n", recordCount)
-	fmt.Printf("   Matching buckets: %d\n", results.MatchingBuckets)
-	fmt.Printf("   Candidate pairs: %d\n", results.CandidatePairs)
-	fmt.Printf("   Matches found: %d\n", results.TotalMatches)
-	fmt.Printf("   Party 1 records: %d\n", results.Party1Records)
-	fmt.Printf("   Party 2 records: %d\n", results.Party2Records)
-
+	// Count true matches
 	matchesFound := 0
+	var trueMatches []*match.MatchResult
 	for _, match := range results.Matches {
 		if match.IsMatch {
 			matchesFound++
+			trueMatches = append(trueMatches, match)
 		}
 	}
 
-	if matchesFound > 0 {
-		fmt.Printf("\n📋 Detailed Matches:\n")
-		count := 0
-		for _, match := range results.Matches {
-			if match.IsMatch {
-				count++
-				fmt.Printf("%3d. %s <-> %s (Score: %.3f, Hamming: %d)\n",
-					count, match.ID1, match.ID2, match.MatchScore, match.HammingDistance)
-			}
-		}
-	} else {
-		fmt.Println("   No matches found")
+	// Save intersection results to file
+	if err := saveIntersectionResults(trueMatches, sessionID); err != nil {
+		Error("Failed to save intersection results: %v", err)
+		return fmt.Errorf("failed to save intersection results: %w", err)
 	}
+
+	// Display clean summary (no detailed matches)
+	fmt.Println("\n🎯 Matching Results:")
+	fmt.Println("==================")
+	fmt.Printf("📈 Records processed: %d\n", recordCount)
+	fmt.Printf("🔍 Matches found: %d\n", matchesFound)
+	fmt.Printf("💾 Results saved to: out/intersection_results.csv\n")
 
 	Info("Results processing completed: %d total matches, %d true matches",
 		results.TotalMatches, matchesFound)
@@ -307,6 +298,34 @@ func processResults(resultsMessage MatchingMessage, recordCount int, sessionID s
 		"candidate_pairs": results.CandidatePairs,
 	})
 
+	return nil
+}
+
+// saveIntersectionResults saves the intersection results to a CSV file
+func saveIntersectionResults(matches []*match.MatchResult, sessionID string) error {
+	// Ensure output directory exists
+	if err := EnsureOutputDirectory(); err != nil {
+		return fmt.Errorf("failed to ensure output directory: %w", err)
+	}
+
+	// Create intersection results file
+	filename := "out/intersection_results.csv"
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create intersection file %s: %w", filename, err)
+	}
+	defer file.Close()
+
+	// Write CSV header
+	file.WriteString("Sender_ID,Receiver_ID,Match_Score,Hamming_Distance,Is_Match\n")
+
+	// Write match results
+	for _, match := range matches {
+		file.WriteString(fmt.Sprintf("%s,%s,%.3f,%d,%t\n",
+			match.ID1, match.ID2, match.MatchScore, match.HammingDistance, match.IsMatch))
+	}
+
+	Info("Intersection results saved to: %s with %d matches", filename, len(matches))
 	return nil
 }
 

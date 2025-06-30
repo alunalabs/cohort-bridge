@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -59,39 +60,20 @@ func main() {
 
 func runInteractiveMode() {
 	fmt.Println("🎯 Interactive Mode")
-	fmt.Println("Choose what you'd like to do:")
-	fmt.Println()
 
-	mainPrompt := promptui.Select{
-		Label: "Select an operation",
-		Items: []string{
-			"🔐 Tokenize - Convert PHI data to privacy-preserving tokens",
-			"🔍 Intersect - Find matches between tokenized datasets",
-			"📡 Send - Network operations for secure communication",
-			"🔬 Validate - Test results against ground truth",
-			"⚙️  Workflows - Orchestrate complex PPRL operations",
-			"❓ Help - Show detailed help information",
-			"🚪 Exit",
-		},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "▶ {{ . | cyan }}",
-			Inactive: "  {{ . | white }}",
-			Selected: "✓ {{ . | green }}",
-		},
-		Size:     7,
-		HideHelp: true,
+	options := []string{
+		"🔐 Tokenize - Convert PHI data to privacy-preserving tokens",
+		"🔍 Intersect - Find matches between tokenized datasets",
+		"📡 Send - Network operations for secure communication",
+		"🔬 Validate - Test results against ground truth",
+		"⚙️  Workflows - Orchestrate complex PPRL operations",
+		"❓ Help - Show detailed help information",
+		"🚪 Exit",
 	}
 
-	selectedIndex, _, err := mainPrompt.Run()
-	if err != nil {
-		fmt.Printf("❌ Error in interactive mode: %v\n", err)
-		os.Exit(1)
-	}
+	choice := promptForChoice("Choose what you'd like to do:", options)
 
-	fmt.Println()
-
-	switch selectedIndex {
+	switch choice {
 	case 0: // Tokenize
 		runTokenizeCommand([]string{"-interactive"})
 	case 1: // Intersect
@@ -108,6 +90,58 @@ func runInteractiveMode() {
 		fmt.Println("👋 Goodbye!")
 		os.Exit(0)
 	}
+}
+
+// Simple text input with arrow key support for text editing
+func promptForInput(message, defaultValue string) string {
+	var prompt string
+	if defaultValue != "" {
+		prompt = fmt.Sprintf("%s (default: %s): ", message, defaultValue)
+	} else {
+		prompt = fmt.Sprintf("%s: ", message)
+	}
+	fmt.Fprint(os.Stderr, prompt)
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		// Handle EOF or other read errors
+		if defaultValue != "" {
+			fmt.Printf("\nNo input received, using default: %s\n", defaultValue)
+			return defaultValue
+		}
+		fmt.Printf("\nNo input received and no default available\n")
+		return ""
+	}
+
+	input = strings.TrimSpace(input)
+	if input == "" && defaultValue != "" {
+		return defaultValue
+	}
+	return input
+}
+
+// Use promptui for menu selection with arrow keys
+func promptForChoice(message string, options []string) int {
+	prompt := promptui.Select{
+		Label: message,
+		Items: options,
+		Size:  10, // Show up to 10 items at once
+		Templates: &promptui.SelectTemplates{
+			Label:    "{{ . }}",
+			Active:   "▶ {{ . | cyan }}",
+			Inactive: "  {{ . }}",
+			Selected: "✓ {{ . | green }}",
+		},
+	}
+
+	index, _, err := prompt.Run()
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	return index
 }
 
 func handleLegacyMode(mode string, args []string) {
@@ -144,9 +178,6 @@ func showMainHelp() {
 	fmt.Println("  validate    🔬 Test results against ground truth")
 	fmt.Println("  workflows   ⚙️  Orchestrate complex PPRL operations")
 	fmt.Println()
-	fmt.Println("LEGACY MODES:")
-	fmt.Println("  -mode=sender     Run as data sender")
-	fmt.Println("  -mode=receiver   Run as data receiver")
 	fmt.Println()
 	fmt.Println("GLOBAL OPTIONS:")
 	fmt.Println("  -help, --help    Show this help message")

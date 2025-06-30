@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/manifoldco/promptui"
-
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
 	"github.com/auroradata-ai/cohort-bridge/internal/match"
@@ -40,22 +38,6 @@ type MatchPair struct {
 	Score float64
 }
 
-// createSelectPrompt creates a consistent promptui.Select with proper terminal handling
-func createSelectPrompt(label string, items []string) promptui.Select {
-	return promptui.Select{
-		Label: label,
-		Items: items,
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "▶ {{ . | cyan }}",
-			Inactive: "  {{ . | white }}",
-			Selected: "✓ {{ . | green }}",
-		},
-		Size:     len(items),
-		HideHelp: true,
-	}
-}
-
 func runValidateCommand(args []string) {
 	fmt.Println("🔬 CohortBridge Validation Tool")
 	fmt.Println("===============================")
@@ -81,7 +63,7 @@ func runValidateCommand(args []string) {
 	}
 
 	// If missing required parameters or interactive mode requested, go interactive
-	if *config1File == "" || *config2File == "" || *groundTruthFile == "" || *interactive {
+	if *config1File == "" || *config2File == "" || *groundTruthFile == "" || *outputFile == "" || *interactive {
 		fmt.Println("🎯 Interactive Validation Setup")
 		fmt.Println("Let's configure your validation parameters...\n")
 
@@ -118,45 +100,20 @@ func runValidateCommand(args []string) {
 		// Get output file with smart default
 		if *outputFile == "" {
 			defaultOutput := generateValidationOutputName(*config1File, *config2File)
-			outputPrompt := promptui.Prompt{
-				Label:   "Output CSV file for validation report",
-				Default: defaultOutput,
-				Validate: func(input string) error {
-					if strings.TrimSpace(input) == "" {
-						return fmt.Errorf("output file cannot be empty")
-					}
-					if !strings.HasSuffix(strings.ToLower(input), ".csv") {
-						return fmt.Errorf("output file must be a CSV file (.csv)")
-					}
-					return nil
-				},
-			}
-
-			result, err := outputPrompt.Run()
-			if err != nil {
-				fmt.Printf("❌ Error getting output file: %v\n", err)
-				os.Exit(1)
-			}
-			*outputFile = result
+			*outputFile = promptForInput("Output CSV file for validation report", defaultOutput)
 		}
 
 		// Configure match threshold
 		fmt.Println("\n🎯 Matching Configuration")
 
-		thresholdPrompt := createSelectPrompt("Select match threshold", []string{
+		thresholdChoice := promptForChoice("Select match threshold:", []string{
 			"🎯 100 - Default (recommended for good matches)",
 			"🔥 50 - Very strict matching",
 			"⚖️  150 - More lenient matching",
 			"🔧 Custom - Enter custom value",
 		})
 
-		thresholdIndex, _, err := thresholdPrompt.Run()
-		if err != nil {
-			fmt.Printf("❌ Error selecting threshold: %v\n", err)
-			os.Exit(1)
-		}
-
-		switch thresholdIndex {
+		switch thresholdChoice {
 		case 0:
 			*matchThreshold = 100
 		case 1:
@@ -164,42 +121,21 @@ func runValidateCommand(args []string) {
 		case 2:
 			*matchThreshold = 150
 		case 3:
-			customPrompt := promptui.Prompt{
-				Label:   "Enter custom Hamming distance threshold (0-500)",
-				Default: "100",
-				Validate: func(input string) error {
-					var val uint
-					_, err := fmt.Sscanf(input, "%d", &val)
-					if err != nil {
-						return fmt.Errorf("must be a valid number")
-					}
-					if val > 500 {
-						return fmt.Errorf("threshold must be 500 or less")
-					}
-					return nil
-				},
+			customResult := promptForInput("Enter custom Hamming distance threshold (0-500)", "100")
+			if val, err := strconv.ParseUint(customResult, 10, 32); err == nil && val <= 500 {
+				*matchThreshold = uint(val)
+			} else {
+				fmt.Println("⚠️  Invalid threshold, using default: 100")
+				*matchThreshold = 100
 			}
-
-			customResult, err := customPrompt.Run()
-			if err != nil {
-				fmt.Printf("❌ Error getting custom threshold: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Sscanf(customResult, "%d", matchThreshold)
 		}
 
 		// Verbose mode
-		verbosePrompt := createSelectPrompt("Enable verbose output?", []string{
+		verboseChoice := promptForChoice("Enable verbose output?", []string{
 			"📊 Standard - Basic metrics and summary",
 			"🔍 Verbose - Detailed analysis and breakdown",
 		})
-
-		verboseIndex, _, err := verbosePrompt.Run()
-		if err != nil {
-			fmt.Printf("❌ Error selecting verbose mode: %v\n", err)
-			os.Exit(1)
-		}
-		*verbose = (verboseIndex == 1)
+		*verbose = (verboseChoice == 1)
 
 		fmt.Println()
 	}
@@ -226,19 +162,18 @@ func runValidateCommand(args []string) {
 	// Only show confirmation prompt if in interactive mode
 	if *interactive || (*config1File == "" || *config2File == "" || *groundTruthFile == "") {
 		// Confirm before proceeding
-		confirmPrompt := createSelectPrompt("Ready to start validation?", []string{
+		confirmChoice := promptForChoice("Ready to start validation?", []string{
 			"✅ Yes, start validation",
 			"⚙️  Change configuration",
 			"❌ Cancel",
 		})
 
-		confirmIndex, _, err := confirmPrompt.Run()
-		if err != nil || confirmIndex == 2 {
+		if confirmChoice == 2 {
 			fmt.Println("\n👋 Validation cancelled. Goodbye!")
 			os.Exit(0)
 		}
 
-		if confirmIndex == 1 {
+		if confirmChoice == 1 {
 			// Restart configuration
 			fmt.Println("\n🔄 Restarting configuration...\n")
 			newArgs := append([]string{"-interactive"}, args...)
@@ -279,23 +214,7 @@ func selectConfigFile(label string) (string, error) {
 
 	if len(configFiles) == 0 {
 		// Manual input if no files found
-		prompt := promptui.Prompt{
-			Label: label + " (enter .yaml file path)",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("config file path cannot be empty")
-				}
-				if _, err := os.Stat(input); os.IsNotExist(err) {
-					return fmt.Errorf("file does not exist: %s", input)
-				}
-				if !strings.HasSuffix(strings.ToLower(input), ".yaml") {
-					return fmt.Errorf("config file must be a YAML file (.yaml)")
-				}
-				return nil
-			},
-		}
-
-		return prompt.Run()
+		return promptForInput(label+" (enter .yaml file path)", ""), nil
 	}
 
 	// Add manual input option
@@ -312,32 +231,11 @@ func selectConfigFile(label string) (string, error) {
 		}
 	}
 
-	selectPrompt := createSelectPrompt(label, displayOptions)
-
-	selectedIndex, _, err := selectPrompt.Run()
-	if err != nil {
-		return "", err
-	}
+	selectedIndex := promptForChoice(label, displayOptions)
 
 	selectedFile := configFiles[selectedIndex]
 	if selectedFile == "📝 Enter file path manually..." {
-		prompt := promptui.Prompt{
-			Label: "Enter config file path (.yaml)",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("config file path cannot be empty")
-				}
-				if _, err := os.Stat(input); os.IsNotExist(err) {
-					return fmt.Errorf("file does not exist: %s", input)
-				}
-				if !strings.HasSuffix(strings.ToLower(input), ".yaml") {
-					return fmt.Errorf("config file must be a YAML file (.yaml)")
-				}
-				return nil
-			},
-		}
-
-		return prompt.Run()
+		return promptForInput("Enter config file path (.yaml)", ""), nil
 	}
 
 	return selectedFile, nil
@@ -363,23 +261,7 @@ func selectGroundTruthFile() (string, error) {
 
 	if len(groundTruthFiles) == 0 {
 		// Manual input if no files found
-		prompt := promptui.Prompt{
-			Label: "Ground Truth CSV File (enter path, should be in data/ directory)",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("ground truth file path cannot be empty")
-				}
-				if _, err := os.Stat(input); os.IsNotExist(err) {
-					return fmt.Errorf("file does not exist: %s", input)
-				}
-				if !strings.HasSuffix(strings.ToLower(input), ".csv") {
-					return fmt.Errorf("ground truth file must be a CSV file (.csv)")
-				}
-				return nil
-			},
-		}
-
-		return prompt.Run()
+		return promptForInput("Ground Truth CSV File (enter path, should be in data/ directory)", ""), nil
 	}
 
 	// Add manual input option
@@ -398,32 +280,11 @@ func selectGroundTruthFile() (string, error) {
 		}
 	}
 
-	selectPrompt := createSelectPrompt("Select Ground Truth File", displayOptions)
-
-	selectedIndex, _, err := selectPrompt.Run()
-	if err != nil {
-		return "", err
-	}
+	selectedIndex := promptForChoice("Select Ground Truth File", displayOptions)
 
 	selectedFile := groundTruthFiles[selectedIndex]
 	if selectedFile == "📝 Enter file path manually..." {
-		prompt := promptui.Prompt{
-			Label: "Enter ground truth file path (.csv)",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("ground truth file path cannot be empty")
-				}
-				if _, err := os.Stat(input); os.IsNotExist(err) {
-					return fmt.Errorf("file does not exist: %s", input)
-				}
-				if !strings.HasSuffix(strings.ToLower(input), ".csv") {
-					return fmt.Errorf("ground truth file must be a CSV file (.csv)")
-				}
-				return nil
-			},
-		}
-
-		return prompt.Run()
+		return promptForInput("Enter ground truth file path (.csv)", ""), nil
 	}
 
 	return selectedFile, nil
@@ -471,20 +332,7 @@ func selectDataFile(label, context string, extensions []string) (string, error) 
 
 	if len(files) == 0 {
 		// No files found, ask for manual input
-		prompt := promptui.Prompt{
-			Label: label + " (enter file path)",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("file path cannot be empty")
-				}
-				if _, err := os.Stat(input); os.IsNotExist(err) {
-					return fmt.Errorf("file does not exist: %s", input)
-				}
-				return nil
-			},
-		}
-
-		return prompt.Run()
+		return promptForInput(label+" (enter file path)", ""), nil
 	}
 
 	// Add manual input option
@@ -506,29 +354,11 @@ func selectDataFile(label, context string, extensions []string) (string, error) 
 		}
 	}
 
-	selectPrompt := createSelectPrompt(label, displayOptions)
-
-	selectedIndex, _, err := selectPrompt.Run()
-	if err != nil {
-		return "", err
-	}
+	selectedIndex := promptForChoice(label, displayOptions)
 
 	selectedFile := files[selectedIndex]
 	if selectedFile == "📝 Enter file path manually..." {
-		prompt := promptui.Prompt{
-			Label: "Enter file path",
-			Validate: func(input string) error {
-				if strings.TrimSpace(input) == "" {
-					return fmt.Errorf("file path cannot be empty")
-				}
-				if _, err := os.Stat(input); os.IsNotExist(err) {
-					return fmt.Errorf("file does not exist: %s", input)
-				}
-				return nil
-			},
-		}
-
-		return prompt.Run()
+		return promptForInput("Enter file path", ""), nil
 	}
 
 	return selectedFile, nil

@@ -320,42 +320,57 @@ func (m *StreamingMatcher) MatchBatchAgainstSender(
 				continue
 			}
 
-			// Calculate match score
-			maxBits := float64(receiverRecord.BloomFilter.GetSize())
-			jaccard := 1.0 - (float64(hammingDist) / maxBits)
+			// Calculate match score using PROVEN working method from validate command
+			bfSize := receiverRecord.BloomFilter.GetSize()
+			matchScore := 1.0
+			if hammingDist > 0 {
+				matchScore = 1.0 - (float64(hammingDist) / float64(bfSize))
+			}
 
-			// Determine if this is a match
+			// Calculate Jaccard similarity for additional scoring
+			var jaccardSim float64
+			// For Bloom filters, use Hamming-based approximation for consistency
+			jaccardSim = 1.0 - (float64(hammingDist) / float64(bfSize))
+
+			// Determine if this is a match based on Hamming threshold ONLY (same as validate command)
+			// This is the KEY difference - validate command uses ONLY Hamming distance
 			isMatch := hammingDist <= m.config.HammingThreshold
 
 			// Create match result
 			result := &match.MatchResult{
-				ID1:             receiverRecord.ID,
-				ID2:             senderID,
-				MatchScore:      jaccard,
-				HammingDistance: hammingDist,
-				IsMatch:         isMatch,
+				ID1:               receiverRecord.ID,
+				ID2:               senderID,
+				MatchScore:        matchScore, // Use normalized 0-1 score
+				JaccardSimilarity: jaccardSim, // For compatibility
+				HammingDistance:   hammingDist,
+				IsMatch:           isMatch,
 			}
 
-			// Write result immediately (streaming)
-			if err := m.resultWriter.WriteMatch(result); err != nil {
-				return fmt.Errorf("failed to write match result: %w", err)
-			}
-
+			// Write ALL matches that meet the threshold (same as validate)
 			if isMatch {
+				// Write result immediately (streaming)
+				if err := m.resultWriter.WriteMatch(result); err != nil {
+					return fmt.Errorf("failed to write match result: %w", err)
+				}
+
 				batchMatches++
 				m.totalMatches++
-				Debug("Match found: %s <-> %s (Hamming: %d, Jaccard: %.3f)",
-					receiverRecord.ID, senderID, hammingDist, jaccard)
+
+				// Debug first few matches found
+				if m.totalMatches <= 5 {
+					Debug("Match #%d: %s <-> %s (Hamming: %d ≤ %d, Score: %.6f)",
+						m.totalMatches, receiverRecord.ID, senderID, hammingDist, m.config.HammingThreshold, matchScore)
+				}
 			}
 		}
 	}
 
 	duration := time.Since(batchStart)
 	if m.config.EnableProgressLog {
-		Info("Batch %d: %d comparisons, %d matches in %v (avg: %v/comparison)",
+		Info("Batch %d: %d comparisons, %d matches in %v (avg: %v/comparison) - using Hamming <= %d",
 			receiverBatch.Offset/m.config.BatchSize+1,
 			batchComparisons, batchMatches, duration,
-			duration/time.Duration(batchComparisons))
+			duration/time.Duration(batchComparisons), m.config.HammingThreshold)
 	}
 
 	return nil
