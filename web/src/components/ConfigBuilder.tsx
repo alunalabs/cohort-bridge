@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { ArrowLeft, Download, Copy, Check } from 'lucide-react';
 import { useForm, FormProvider } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
+
 import * as z from 'zod';
 import yaml from 'js-yaml';
 

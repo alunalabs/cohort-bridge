@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Github, Download, Terminal, FileText, Copy, Check, ExternalLink, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Github, Download, Terminal, Copy, Check, ExternalLink, GitBranch } from 'lucide-react';
 
 export default function GetStartedPage() {
     const router = useRouter();
@@ -17,135 +17,168 @@ export default function GetStartedPage() {
 
     const installCommands = {
         windows: {
-            download: 'Invoke-WebRequest -Uri "https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-windows.zip" -OutFile "cohort-bridge.zip"',
-            extract: 'Expand-Archive -Path "cohort-bridge.zip" -DestinationPath "C:\\Program Files\\CohortBridge"',
-            path: '$env:PATH += ";C:\\Program Files\\CohortBridge"'
+            download: 'curl -L "https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-windows.exe" -o cohort-bridge.exe',
+            install: 'move cohort-bridge.exe C:\\Windows\\System32\\',
+            verify: 'cohort-bridge --version'
         },
         macos: {
-            download: 'curl -L "https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-macos.tar.gz" -o cohort-bridge.tar.gz',
-            extract: 'tar -xzf cohort-bridge.tar.gz -C /usr/local/bin/',
-            path: 'echo \'export PATH="/usr/local/bin:$PATH"\' >> ~/.zshrc && source ~/.zshrc'
+            download: 'curl -L "https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-macos" -o cohort-bridge',
+            install: 'chmod +x cohort-bridge && sudo mv cohort-bridge /usr/local/bin/',
+            verify: 'cohort-bridge --version'
         },
         linux: {
-            download: 'wget https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-linux.tar.gz',
-            extract: 'tar -xzf cohort-bridge-linux.tar.gz -C /usr/local/bin/',
-            path: 'echo \'export PATH="/usr/local/bin:$PATH"\' >> ~/.bashrc && source ~/.bashrc'
+            download: 'wget https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-linux',
+            install: 'chmod +x cohort-bridge-linux && sudo mv cohort-bridge-linux /usr/local/bin/cohort-bridge',
+            verify: 'cohort-bridge --version'
         }
     };
 
     const configTemplates = [
         {
-            name: 'Basic CSV Configuration',
-            description: 'Simple setup for CSV file record linkage',
-            command: 'cohort-bridge init --template basic --output config.yaml'
+            name: 'Basic CSV',
+            description: 'Simple CSV record linkage',
+            command: 'cohort-bridge init --template basic'
         },
         {
-            name: 'PostgreSQL Configuration',
-            description: 'Database connection with secure matching',
-            command: 'cohort-bridge init --template postgres --output config-postgres.yaml'
+            name: 'PostgreSQL',
+            description: 'Database connection setup',
+            command: 'cohort-bridge init --template postgres'
         },
         {
             name: 'Secure Multi-Party',
-            description: 'Enhanced security for sensitive data',
-            command: 'cohort-bridge init --template secure --output config-secure.yaml'
+            description: 'Enhanced privacy protocols',
+            command: 'cohort-bridge init --template secure'
         },
         {
-            name: 'Tokenized Workflow',
+            name: 'Tokenized',
             description: 'Pre-tokenized data processing',
-            command: 'cohort-bridge init --template tokenized --output config-tokenized.yaml'
+            command: 'cohort-bridge init --template tokenized'
         }
     ];
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+        <div className="min-h-screen bg-gray-50">
             {/* Header */}
-            <header className="bg-white shadow-sm border-b border-slate-200">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between items-center py-6">
-                        <div className="flex items-center space-x-4">
-                            <button
-                                onClick={() => router.push('/')}
-                                className="flex items-center space-x-2 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
-                            >
-                                <ArrowLeft className="h-5 w-5" />
-                                <span>Back to Home</span>
-                            </button>
-                        </div>
-                        <div className="flex items-center space-x-3">
-                            <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                                <Terminal className="h-4 w-4 text-white" />
+            <header className="border-b border-gray-200 bg-white">
+                <div className="max-w-6xl mx-auto px-4">
+                    <div className="flex justify-between items-center py-4">
+                        <button
+                            onClick={() => router.push('/')}
+                            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
+                        >
+                            <ArrowLeft className="h-4 w-4" />
+                            <span className="text-sm">Back</span>
+                        </button>
+                        <div className="flex items-center space-x-2">
+                            <div className="w-6 h-6 bg-gradient-to-r from-blue-500 to-purple-500 rounded flex items-center justify-center">
+                                <Terminal className="h-3 w-3 text-white" />
                             </div>
                             <div>
-                                <h1 className="text-lg font-bold text-slate-900">CohortBridge</h1>
-                                <p className="text-xs text-slate-600">Get Started</p>
+                                <h1 className="text-sm font-medium text-gray-900">Installation</h1>
+                                <p className="text-xs text-gray-500">CLI Setup Guide</p>
                             </div>
                         </div>
+                        <a
+                            href="https://github.com/alunalabs/cohort-bridge#readme"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gray-600 hover:text-gray-900 transition-colors text-sm"
+                        >
+                            Documentation
+                        </a>
                     </div>
                 </div>
             </header>
 
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-                {/* Hero Section */}
-                <div className="text-center mb-16">
-                    <h2 className="text-4xl font-bold text-slate-900 mb-6">
-                        Get Started with CohortBridge
+            <div className="max-w-4xl mx-auto px-4 py-12">
+                {/* Header */}
+                <div className="mb-12">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-3">
+                        Install CohortBridge CLI
                     </h2>
-                    <p className="text-xl text-slate-600 max-w-3xl mx-auto leading-relaxed">
-                        Follow these simple steps to install the CLI tool and create your first configuration.
-                        You'll be up and running in just a few minutes!
+                    <p className="text-gray-600 max-w-2xl">
+                        Download the CLI tool and create your first configuration.
+                        Supports Windows, macOS, and Linux.
                     </p>
                 </div>
 
                 {/* Steps */}
                 <div className="space-y-8">
-                    {/* Step 1: Visit GitHub */}
-                    <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-8">
-                        <div className="flex items-start space-x-4">
-                            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                <span className="text-xl font-bold text-blue-600">1</span>
+                    {/* Step 1: GitHub */}
+                    <div className="gradient-card rounded p-6 border">
+                        <div className="flex items-start space-x-3">
+                            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
+                                <span className="text-sm font-bold text-white">1</span>
                             </div>
                             <div className="flex-1">
-                                <h3 className="text-xl font-semibold text-slate-900 mb-3">
-                                    Visit the GitHub Repository
-                                </h3>
-                                <p className="text-slate-600 mb-4">
-                                    Head to our GitHub repository to access the latest releases, documentation, and source code.
+                                <div className="flex items-center space-x-2 mb-2">
+                                    <h3 className="text-lg font-semibold text-gray-900">
+                                        GitHub Repository
+                                    </h3>
+                                    <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                                        OPEN SOURCE
+                                    </div>
+                                </div>
+                                <p className="text-gray-600 mb-4 text-sm">
+                                    Access releases, documentation, source code, and community discussions.
                                 </p>
-                                <button
-                                    onClick={() => window.open('https://github.com/alunalabs/cohort-bridge', '_blank')}
-                                    className="inline-flex items-center space-x-2 bg-slate-900 text-white px-6 py-3 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                                >
-                                    <Github className="h-5 w-5" />
-                                    <span>Open GitHub Repository</span>
-                                    <ExternalLink className="h-4 w-4" />
-                                </button>
+                                <div className="flex flex-wrap gap-3">
+                                    <a
+                                        href="https://github.com/alunalabs/cohort-bridge"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center space-x-2 bg-gray-900 text-white px-4 py-2 rounded text-sm hover:bg-gray-800 transition-colors font-medium"
+                                    >
+                                        <Github className="h-4 w-4" />
+                                        <span>View Repository</span>
+                                        <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                    <a
+                                        href="https://github.com/alunalabs/cohort-bridge/releases"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center space-x-2 border border-gray-300 text-gray-700 px-4 py-2 rounded text-sm hover:border-gray-400 hover:text-gray-900 transition-colors bg-white"
+                                    >
+                                        <Download className="h-4 w-4" />
+                                        <span>Latest Release</span>
+                                    </a>
+                                    <a
+                                        href="https://github.com/alunalabs/cohort-bridge/issues"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center space-x-2 border border-gray-300 text-gray-700 px-4 py-2 rounded text-sm hover:border-gray-400 hover:text-gray-900 transition-colors bg-white"
+                                    >
+                                        <GitBranch className="h-4 w-4" />
+                                        <span>Issues & Support</span>
+                                    </a>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Step 2: Install CLI Tool */}
-                    <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-8">
-                        <div className="flex items-start space-x-4">
-                            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                <span className="text-xl font-bold text-green-600">2</span>
+                    {/* Step 2: Install */}
+                    <div className="gradient-card rounded p-6 border">
+                        <div className="flex items-start space-x-3">
+                            <div className="w-8 h-8 bg-gradient-to-r from-teal-500 to-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                                <span className="text-sm font-bold text-white">2</span>
                             </div>
                             <div className="flex-1">
-                                <h3 className="text-xl font-semibold text-slate-900 mb-3">
-                                    Install the CLI Tool
+                                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                    Install CLI Tool
                                 </h3>
-                                <p className="text-slate-600 mb-4">
-                                    Download and install the CohortBridge CLI tool for your operating system.
+                                <p className="text-gray-600 mb-4 text-sm">
+                                    Download binary for your platform.
                                 </p>
 
                                 {/* OS Selection */}
-                                <div className="flex space-x-2 mb-6">
+                                <div className="flex space-x-2 mb-4">
                                     {(['windows', 'macos', 'linux'] as const).map((os) => (
                                         <button
                                             key={os}
                                             onClick={() => setSelectedOS(os)}
-                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${selectedOS === os
-                                                    ? 'bg-blue-600 text-white'
-                                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                            className={`px-3 py-1 rounded text-sm font-medium transition-colors ${selectedOS === os
+                                                ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white'
+                                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
                                                 }`}
                                         >
                                             {os === 'macos' ? 'macOS' : os.charAt(0).toUpperCase() + os.slice(1)}
@@ -153,63 +186,63 @@ export default function GetStartedPage() {
                                     ))}
                                 </div>
 
-                                {/* Installation Commands */}
-                                <div className="space-y-4">
+                                {/* Commands */}
+                                <div className="space-y-3">
                                     {/* Download */}
                                     <div>
-                                        <h4 className="text-sm font-semibold text-slate-900 mb-2">Download</h4>
-                                        <div className="bg-slate-900 rounded-lg p-4 relative">
-                                            <code className="text-green-400 text-sm font-mono">
+                                        <h4 className="text-sm font-medium text-gray-800 mb-1">Download</h4>
+                                        <div className="bg-slate-50 border border-slate-200 rounded p-3 relative">
+                                            <code className="text-slate-700 text-xs font-mono">
                                                 {installCommands[selectedOS].download}
                                             </code>
                                             <button
                                                 onClick={() => copyToClipboard(installCommands[selectedOS].download, `download-${selectedOS}`)}
-                                                className="absolute top-2 right-2 p-2 hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                                                className="absolute top-2 right-2 p-1 hover:bg-slate-200 rounded transition-colors"
                                             >
                                                 {copiedStep === `download-${selectedOS}` ? (
-                                                    <Check className="h-4 w-4 text-green-400" />
+                                                    <Check className="h-3 w-3 text-green-600" />
                                                 ) : (
-                                                    <Copy className="h-4 w-4 text-slate-400" />
+                                                    <Copy className="h-3 w-3 text-gray-500" />
                                                 )}
                                             </button>
                                         </div>
                                     </div>
 
-                                    {/* Extract */}
+                                    {/* Install */}
                                     <div>
-                                        <h4 className="text-sm font-semibold text-slate-900 mb-2">Extract & Install</h4>
-                                        <div className="bg-slate-900 rounded-lg p-4 relative">
-                                            <code className="text-green-400 text-sm font-mono">
-                                                {installCommands[selectedOS].extract}
+                                        <h4 className="text-sm font-medium text-gray-800 mb-1">Install</h4>
+                                        <div className="bg-slate-50 border border-slate-200 rounded p-3 relative">
+                                            <code className="text-slate-700 text-xs font-mono">
+                                                {installCommands[selectedOS].install}
                                             </code>
                                             <button
-                                                onClick={() => copyToClipboard(installCommands[selectedOS].extract, `extract-${selectedOS}`)}
-                                                className="absolute top-2 right-2 p-2 hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                                                onClick={() => copyToClipboard(installCommands[selectedOS].install, `install-${selectedOS}`)}
+                                                className="absolute top-2 right-2 p-1 hover:bg-slate-200 rounded transition-colors"
                                             >
-                                                {copiedStep === `extract-${selectedOS}` ? (
-                                                    <Check className="h-4 w-4 text-green-400" />
+                                                {copiedStep === `install-${selectedOS}` ? (
+                                                    <Check className="h-3 w-3 text-green-600" />
                                                 ) : (
-                                                    <Copy className="h-4 w-4 text-slate-400" />
+                                                    <Copy className="h-3 w-3 text-gray-500" />
                                                 )}
                                             </button>
                                         </div>
                                     </div>
 
-                                    {/* Add to PATH */}
+                                    {/* Verify */}
                                     <div>
-                                        <h4 className="text-sm font-semibold text-slate-900 mb-2">Add to PATH (Recommended)</h4>
-                                        <div className="bg-slate-900 rounded-lg p-4 relative">
-                                            <code className="text-green-400 text-sm font-mono">
-                                                {installCommands[selectedOS].path}
+                                        <h4 className="text-sm font-medium text-gray-800 mb-1">Verify Installation</h4>
+                                        <div className="bg-slate-50 border border-slate-200 rounded p-3 relative">
+                                            <code className="text-slate-700 text-xs font-mono">
+                                                {installCommands[selectedOS].verify}
                                             </code>
                                             <button
-                                                onClick={() => copyToClipboard(installCommands[selectedOS].path, `path-${selectedOS}`)}
-                                                className="absolute top-2 right-2 p-2 hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                                                onClick={() => copyToClipboard(installCommands[selectedOS].verify, `verify-${selectedOS}`)}
+                                                className="absolute top-2 right-2 p-1 hover:bg-slate-200 rounded transition-colors"
                                             >
-                                                {copiedStep === `path-${selectedOS}` ? (
-                                                    <Check className="h-4 w-4 text-green-400" />
+                                                {copiedStep === `verify-${selectedOS}` ? (
+                                                    <Check className="h-3 w-3 text-green-600" />
                                                 ) : (
-                                                    <Copy className="h-4 w-4 text-slate-400" />
+                                                    <Copy className="h-3 w-3 text-gray-500" />
                                                 )}
                                             </button>
                                         </div>
@@ -219,108 +252,94 @@ export default function GetStartedPage() {
                         </div>
                     </div>
 
-                    {/* Step 3: Create Configuration */}
-                    <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-8">
-                        <div className="flex items-start space-x-4">
-                            <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                <span className="text-xl font-bold text-purple-600">3</span>
+                    {/* Step 3: Initialize */}
+                    <div className="gradient-card rounded p-6 border">
+                        <div className="flex items-start space-x-3">
+                            <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center flex-shrink-0">
+                                <span className="text-sm font-bold text-white">3</span>
                             </div>
                             <div className="flex-1">
-                                <h3 className="text-xl font-semibold text-slate-900 mb-3">
-                                    Create Your Configuration
+                                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                    Create Configuration
                                 </h3>
-                                <p className="text-slate-600 mb-6">
-                                    Choose from our pre-built templates or create a configuration from scratch.
+                                <p className="text-gray-600 mb-4 text-sm">
+                                    Generate a configuration file using built-in templates.
                                 </p>
 
-                                {/* Templates */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     {configTemplates.map((template, index) => (
-                                        <div
-                                            key={index}
-                                            className="border border-slate-200 rounded-lg p-4 hover:border-slate-300 transition-colors"
-                                        >
-                                            <h4 className="font-semibold text-slate-900 mb-1">{template.name}</h4>
-                                            <p className="text-sm text-slate-600 mb-3">{template.description}</p>
-                                            <div className="bg-slate-900 rounded p-2 relative">
-                                                <code className="text-green-400 text-xs font-mono">
-                                                    {template.command}
-                                                </code>
+                                        <div key={index} className="bg-white border border-gray-200 rounded p-3">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div>
+                                                    <h4 className="text-sm font-medium text-gray-800">{template.name}</h4>
+                                                    <p className="text-xs text-gray-600">{template.description}</p>
+                                                </div>
                                                 <button
                                                     onClick={() => copyToClipboard(template.command, `template-${index}`)}
-                                                    className="absolute top-1 right-1 p-1 hover:bg-slate-700 rounded transition-colors cursor-pointer"
+                                                    className="p-1 hover:bg-gray-100 rounded transition-colors"
                                                 >
                                                     {copiedStep === `template-${index}` ? (
-                                                        <Check className="h-3 w-3 text-green-400" />
+                                                        <Check className="h-3 w-3 text-green-600" />
                                                     ) : (
-                                                        <Copy className="h-3 w-3 text-slate-400" />
+                                                        <Copy className="h-3 w-3 text-gray-500" />
                                                     )}
                                                 </button>
                                             </div>
+                                            <code className="text-xs text-blue-600 font-mono bg-blue-50 px-2 py-1 rounded block">{template.command}</code>
                                         </div>
                                     ))}
-                                </div>
-
-                                {/* Or create from scratch */}
-                                <div className="border-t border-slate-200 pt-6">
-                                    <h4 className="font-semibold text-slate-900 mb-2">Or create from scratch:</h4>
-                                    <div className="bg-slate-900 rounded-lg p-4 relative">
-                                        <code className="text-green-400 text-sm font-mono">
-                                            cohort-bridge init --interactive
-                                        </code>
-                                        <button
-                                            onClick={() => copyToClipboard('cohort-bridge init --interactive', 'scratch')}
-                                            className="absolute top-2 right-2 p-2 hover:bg-slate-700 rounded transition-colors cursor-pointer"
-                                        >
-                                            {copiedStep === 'scratch' ? (
-                                                <Check className="h-4 w-4 text-green-400" />
-                                            ) : (
-                                                <Copy className="h-4 w-4 text-slate-400" />
-                                            )}
-                                        </button>
-                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Step 4: Alternative - Use Web Builder */}
-                    <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-8 text-white">
-                        <div className="flex items-start space-x-4">
-                            <div className="w-12 h-12 bg-white bg-opacity-20 rounded-full flex items-center justify-center flex-shrink-0">
-                                <FileText className="h-6 w-6 text-white" />
+                    {/* Step 4: Run */}
+                    <div className="gradient-card rounded p-6 border">
+                        <div className="flex items-start space-x-3">
+                            <div className="w-8 h-8 bg-gradient-to-r from-green-500 to-teal-500 rounded-full flex items-center justify-center flex-shrink-0">
+                                <span className="text-sm font-bold text-white">4</span>
                             </div>
                             <div className="flex-1">
-                                <h3 className="text-xl font-semibold mb-3">
-                                    Alternative: Use Our Web-Based Configuration Builder
+                                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                    Execute Matching
                                 </h3>
-                                <p className="text-blue-100 mb-6">
-                                    Prefer a visual interface? Use our web-based configuration builder to create
-                                    and download YAML configurations without installing the CLI.
+                                <p className="text-gray-600 mb-4 text-sm">
+                                    Run the privacy-preserving record linkage process.
                                 </p>
-                                <button
-                                    onClick={() => router.push('/config')}
-                                    className="inline-flex items-center space-x-2 bg-white text-blue-600 px-6 py-3 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer font-medium"
-                                >
-                                    <span>Try Configuration Builder</span>
-                                    <ChevronRight className="h-4 w-4" />
-                                </button>
+                                <div className="bg-slate-50 border border-slate-200 rounded p-3 relative">
+                                    <code className="text-slate-700 text-xs font-mono">
+                                        cohort-bridge match --config config.yaml --input data.csv
+                                    </code>
+                                    <button
+                                        onClick={() => copyToClipboard('cohort-bridge match --config config.yaml --input data.csv', 'run-match')}
+                                        className="absolute top-2 right-2 p-1 hover:bg-slate-200 rounded transition-colors"
+                                    >
+                                        {copiedStep === 'run-match' ? (
+                                            <Check className="h-3 w-3 text-green-600" />
+                                        ) : (
+                                            <Copy className="h-3 w-3 text-gray-500" />
+                                        )}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 {/* Next Steps */}
-                <div className="mt-16 text-center">
-                    <h3 className="text-2xl font-bold text-slate-900 mb-4">What's Next?</h3>
-                    <p className="text-slate-600 mb-6">
-                        Once you have your configuration file, you can run CohortBridge and start linking records!
+                <div className="mt-12 gradient-card rounded p-6 text-center border">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        Need a visual interface?
+                    </h3>
+                    <p className="text-gray-600 mb-4 text-sm">
+                        Use our web-based configuration builder for complex setups.
                     </p>
-                    <div className="bg-slate-900 rounded-lg p-4 inline-block">
-                        <code className="text-green-400 text-sm font-mono">
-                            cohort-bridge run --config your-config.yaml
-                        </code>
-                    </div>
+                    <button
+                        onClick={() => router.push('/config/basic')}
+                        className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded text-sm font-medium hover:from-blue-600 hover:to-purple-600 transition-all"
+                    >
+                        Open Config Builder
+                    </button>
                 </div>
             </div>
         </div>

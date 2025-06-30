@@ -1,1 +1,59 @@
 @import "tailwindcss";
+
+:root {
+    --font-space-grotesk: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+
+    /* Aluna-inspired color palette */
+    --primary-blue: #3B82F6;
+    --primary-purple: #8B5CF6;
+    --primary-teal: #06B6D4;
+    --accent-pink: #EC4899;
+    --accent-orange: #F97316;
+    --success-green: #10B981;
+
+    /* Backgrounds */
+    --bg-primary: #FAFAFA;
+    --bg-secondary: #FFFFFF;
+    --bg-accent: #F8FAFC;
+}
+
+body {
+    font-family: var(--font-space-grotesk);
+    background-color: var(--bg-primary);
+}
+
+/* Remove all default box shadows and ensure consistent spacing */
+* {
+    box-shadow: none !important;
+}
+
+/* Compact code blocks with healthcare-appropriate styling */
+code,
+pre {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.4;
+    background-color: #F1F5F9;
+    border: 1px solid #E2E8F0;
+}
+
+/* Ensure all buttons have consistent, minimal styling */
+button {
+    box-shadow: none !important;
+}
+
+/* Compact form elements */
+input,
+textarea,
+select {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    border: 1px solid #E2E8F0;
+    background-color: white;
+}
+
+/* Custom gradient backgrounds for cards */
+.gradient-card {
+    background: linear-gradient(135deg, #FAFAFA 0%, #F8FAFC 100%);
+    border: 1px solid #E2E8F0;
+}
