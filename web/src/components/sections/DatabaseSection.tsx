@@ -5,9 +5,10 @@ import { Database, Plus, Minus } from 'lucide-react';
 
 interface DatabaseSectionProps {
     configType: string;
+    missingFields?: string[];
 }
 
-export default function DatabaseSection({ configType }: DatabaseSectionProps) {
+export default function DatabaseSection({ configType, missingFields = [] }: DatabaseSectionProps) {
     const { register, watch, setValue } = useFormContext();
 
     const databaseType = watch('database.type');
@@ -27,6 +28,17 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
         const newFields = [...fields];
         newFields[index] = value;
         setValue('database.fields', newFields);
+    };
+
+    const getInputClass = (fieldName: string) => {
+        const baseClass = "w-full px-3 py-2 border rounded-lg focus:ring-2 text-slate-900 placeholder-slate-400 bg-white transition-colors";
+        const isMissing = missingFields.includes(fieldName);
+
+        if (isMissing) {
+            return `${baseClass} border-red-300 bg-red-50 focus:ring-red-500 focus:border-red-500`;
+        }
+
+        return `${baseClass} border-slate-300 focus:ring-blue-500 focus:border-blue-500`;
     };
 
     return (
@@ -98,12 +110,15 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">
                             CSV Filename <span className="text-red-500">*</span>
+                            {missingFields.includes('database.filename') && (
+                                <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                            )}
                         </label>
                         <input
                             type="text"
                             {...register('database.filename')}
                             placeholder="data/patients.csv"
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                            className={getInputClass('database.filename')}
                         />
                     </div>
                 )}
@@ -118,7 +133,7 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                             type="text"
                             {...register('database.tokenized_file')}
                             placeholder="out/tokens_party_a.json"
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                            className={getInputClass('database.tokenized_file')}
                         />
                     </div>
                 )}
@@ -130,23 +145,29 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
                                     Host <span className="text-red-500">*</span>
+                                    {missingFields.includes('database.host') && (
+                                        <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                                    )}
                                 </label>
                                 <input
                                     type="text"
                                     {...register('database.host')}
                                     placeholder="localhost"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                                    className={getInputClass('database.host')}
                                 />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
                                     Port <span className="text-red-500">*</span>
+                                    {missingFields.includes('database.port') && (
+                                        <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                                    )}
                                 </label>
                                 <input
                                     type="number"
                                     {...register('database.port', { valueAsNumber: true })}
                                     placeholder="5432"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                                    className={getInputClass('database.port')}
                                 />
                             </div>
                         </div>
@@ -155,12 +176,15 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
                                     Username <span className="text-red-500">*</span>
+                                    {missingFields.includes('database.user') && (
+                                        <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                                    )}
                                 </label>
                                 <input
                                     type="text"
                                     {...register('database.user')}
                                     placeholder="cohort_user"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                                    className={getInputClass('database.user')}
                                 />
                             </div>
                             <div>
@@ -171,7 +195,7 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                                     type="password"
                                     {...register('database.password')}
                                     placeholder="your_password_here"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                                    className={getInputClass('database.password')}
                                 />
                             </div>
                         </div>
@@ -180,23 +204,29 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
                                     Database Name <span className="text-red-500">*</span>
+                                    {missingFields.includes('database.dbname') && (
+                                        <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                                    )}
                                 </label>
                                 <input
                                     type="text"
                                     {...register('database.dbname')}
                                     placeholder="cohort_database"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                                    className={getInputClass('database.dbname')}
                                 />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
                                     Table Name <span className="text-red-500">*</span>
+                                    {missingFields.includes('database.table') && (
+                                        <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                                    )}
                                 </label>
                                 <input
                                     type="text"
                                     {...register('database.table')}
                                     placeholder="users"
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
+                                    className={getInputClass('database.table')}
                                 />
                             </div>
                         </div>
@@ -249,7 +279,7 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                                                 value={field}
                                                 onChange={(e) => updateField(index, e.target.value)}
                                                 placeholder={`${fieldLabels[index]?.split(' ')[0].toLowerCase() || 'field'}_name`}
-                                                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                className={getInputClass(`database.fields.${index}`)}
                                             />
                                         </div>
                                         {fields.length > 1 && (
@@ -280,7 +310,7 @@ export default function DatabaseSection({ configType }: DatabaseSectionProps) {
                         max="1"
                         {...register('database.random_bits_percent', { valueAsNumber: true })}
                         placeholder="0.0"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={getInputClass('database.random_bits_percent')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         Higher values (0.05-0.1) increase privacy but reduce matching accuracy. Use 0.0 for maximum accuracy.

@@ -11,7 +11,6 @@ import (
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
-	"github.com/manifoldco/promptui"
 )
 
 func runTokenizeCommand(args []string) {
@@ -63,28 +62,11 @@ func runTokenizeCommand(args []string) {
 
 		// Choose data source
 		if !*useDatabase {
-			sourcePrompt := promptui.Select{
-				Label: "Select data source",
-				Items: []string{
-					"📁 File - Process data from a file",
-					"🗄️  Database - Use database connection from config",
-				},
-				Templates: &promptui.SelectTemplates{
-					Label:    "{{ . }}:",
-					Active:   "▶ {{ . | cyan }}",
-					Inactive: "  {{ . | white }}",
-					Selected: "✓ {{ . | green }}",
-				},
-				Size:     2,
-				HideHelp: true,
-			}
-
-			sourceIndex, _, err := sourcePrompt.Run()
-			if err != nil {
-				fmt.Printf("❌ Error selecting data source: %v\n", err)
-				os.Exit(1)
-			}
-			*useDatabase = (sourceIndex == 1)
+			sourceChoice := promptForChoice("Select data source:", []string{
+				"📁 File - Process data from a file",
+				"🗄️  Database - Use database connection from config",
+			})
+			*useDatabase = (sourceChoice == 1)
 		}
 
 		// Get input file if using file mode
@@ -100,125 +82,62 @@ func runTokenizeCommand(args []string) {
 		// Get output file
 		if *outputFile == "" {
 			defaultOutput := generateTokenizeOutputName(*inputFile, *useDatabase)
-			outputPrompt := promptui.Prompt{
-				Label:   "Output file for tokenized data",
-				Default: defaultOutput,
-				Validate: func(input string) error {
-					if strings.TrimSpace(input) == "" {
-						return fmt.Errorf("output file cannot be empty")
-					}
-					return nil
-				},
-			}
-
-			result, err := outputPrompt.Run()
-			if err != nil {
-				fmt.Printf("❌ Error getting output file: %v\n", err)
-				os.Exit(1)
-			}
-			*outputFile = result
+			*outputFile = promptForInput("Output file for tokenized data", defaultOutput)
 		}
 
-		// Select input format
+		// Select input format with Auto-detect as default
 		if !*useDatabase {
-			formatPrompt := promptui.Select{
-				Label: "Select input format",
-				Items: []string{
-					"📄 CSV - Comma-separated values",
-					"📋 JSON - JavaScript Object Notation",
-					"🔧 Auto-detect from file extension",
-				},
-				Templates: &promptui.SelectTemplates{
-					Label:    "{{ . }}:",
-					Active:   "▶ {{ . | cyan }}",
-					Inactive: "  {{ . | white }}",
-					Selected: "✓ {{ . | green }}",
-				},
-				Size:     3,
-				HideHelp: true,
-			}
-
-			formatIndex, _, err := formatPrompt.Run()
-			if err != nil {
-				fmt.Printf("❌ Error selecting input format: %v\n", err)
-				os.Exit(1)
-			}
-
-			switch formatIndex {
-			case 0:
-				*inputFormat = "csv"
-			case 1:
-				*inputFormat = "json"
-			case 2:
-				*inputFormat = detectInputFormat(*inputFile)
-			}
-		}
-
-		// Select output format
-		outFormatPrompt := promptui.Select{
-			Label: "Select output format",
-			Items: []string{
+			fmt.Println("\nSelect input format (default: Auto-detect):")
+			formatOptions := []string{
+				"🔧 Auto-detect from file extension",
 				"📄 CSV - Comma-separated values",
 				"📋 JSON - JavaScript Object Notation",
-			},
-			Templates: &promptui.SelectTemplates{
-				Label:    "{{ . }}:",
-				Active:   "▶ {{ . | cyan }}",
-				Inactive: "  {{ . | white }}",
-				Selected: "✓ {{ . | green }}",
-			},
-			Size:     2,
-			HideHelp: true,
+			}
+
+			formatChoice := promptForChoice("", formatOptions)
+			switch formatChoice {
+			case 0:
+				*inputFormat = detectInputFormat(*inputFile)
+			case 1:
+				*inputFormat = "csv"
+			case 2:
+				*inputFormat = "json"
+			}
+		} else {
+			*inputFormat = "database"
 		}
 
-		outFormatIndex, _, err := outFormatPrompt.Run()
-		if err != nil {
-			fmt.Printf("❌ Error selecting output format: %v\n", err)
-			os.Exit(1)
+		// Select output format with input format as default
+		var defaultOutputFormat string
+		if *inputFormat == "csv" || *inputFormat == "database" {
+			defaultOutputFormat = "csv"
+		} else {
+			defaultOutputFormat = "json"
 		}
-		*outputFormat = []string{"csv", "json"}[outFormatIndex]
+
+		fmt.Printf("\nSelect output format (default: %s):\n", strings.ToUpper(defaultOutputFormat))
+		outFormatOptions := []string{
+			fmt.Sprintf("📄 CSV - Comma-separated values %s", ifDefault(defaultOutputFormat == "csv")),
+			fmt.Sprintf("📋 JSON - JavaScript Object Notation %s", ifDefault(defaultOutputFormat == "json")),
+		}
+
+		outFormatChoice := promptForChoice("", outFormatOptions)
+		if outFormatChoice == 0 {
+			*outputFormat = "csv"
+		} else {
+			*outputFormat = "json"
+		}
 
 		// Configure batch size
-		batchPrompt := promptui.Prompt{
-			Label:   "Batch size (records to process at once)",
-			Default: strconv.Itoa(*batchSize),
-			Validate: func(input string) error {
-				val, err := strconv.Atoi(input)
-				if err != nil {
-					return fmt.Errorf("must be a valid number")
-				}
-				if val < 1 || val > 100000 {
-					return fmt.Errorf("batch size must be between 1 and 100,000")
-				}
-				return nil
-			},
+		batchSizeStr := promptForInput("Batch size (records to process at once)", strconv.Itoa(*batchSize))
+		if val, err := strconv.Atoi(batchSizeStr); err == nil && val > 0 && val <= 100000 {
+			*batchSize = val
+		} else {
+			fmt.Println("⚠️  Invalid batch size, using default:", *batchSize)
 		}
-
-		batchResult, err := batchPrompt.Run()
-		if err != nil {
-			fmt.Printf("❌ Error getting batch size: %v\n", err)
-			os.Exit(1)
-		}
-		*batchSize, _ = strconv.Atoi(batchResult)
 
 		// Configure MinHash seed
-		seedPrompt := promptui.Prompt{
-			Label:   "MinHash seed for deterministic hashing",
-			Default: *minHashSeed,
-			Validate: func(input string) error {
-				if len(strings.TrimSpace(input)) < 8 {
-					return fmt.Errorf("seed must be at least 8 characters")
-				}
-				return nil
-			},
-		}
-
-		seedResult, err := seedPrompt.Run()
-		if err != nil {
-			fmt.Printf("❌ Error getting MinHash seed: %v\n", err)
-			os.Exit(1)
-		}
-		*minHashSeed = seedResult
+		*minHashSeed = promptForInput("MinHash seed for deterministic hashing", *minHashSeed)
 
 		fmt.Println()
 	}
@@ -254,30 +173,18 @@ func runTokenizeCommand(args []string) {
 	fmt.Println()
 
 	// Confirm before proceeding
-	confirmPrompt := promptui.Select{
-		Label: "Ready to start tokenization?",
-		Items: []string{
-			"✅ Yes, start tokenization",
-			"⚙️  Change configuration",
-			"❌ Cancel",
-		},
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}:",
-			Active:   "▶ {{ . | cyan }}",
-			Inactive: "  {{ . | white }}",
-			Selected: "✓ {{ . | green }}",
-		},
-		Size:     3,
-		HideHelp: true,
-	}
+	confirmChoice := promptForChoice("Ready to start tokenization?", []string{
+		"✅ Yes, start tokenization",
+		"⚙️  Change configuration",
+		"❌ Cancel",
+	})
 
-	confirmIndex, _, err := confirmPrompt.Run()
-	if err != nil || confirmIndex == 2 {
+	if confirmChoice == 2 {
 		fmt.Println("\n👋 Tokenization cancelled. Goodbye!")
 		os.Exit(0)
 	}
 
-	if confirmIndex == 1 {
+	if confirmChoice == 1 {
 		// Restart configuration
 		fmt.Println("\n🔄 Restarting configuration...\n")
 		newArgs := append([]string{"-interactive"}, args...)
@@ -405,4 +312,12 @@ func showTokenizeHelp() {
 	fmt.Println()
 	fmt.Println("  # Force interactive even with some parameters")
 	fmt.Println("  cohort-bridge tokenize -input data.csv -interactive")
+}
+
+// Helper function for default indicators
+func ifDefault(isDefault bool) string {
+	if isDefault {
+		return "(default)"
+	}
+	return ""
 }

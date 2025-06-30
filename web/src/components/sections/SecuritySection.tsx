@@ -3,7 +3,11 @@
 import { useFormContext } from 'react-hook-form';
 import { Shield, Plus, Minus } from 'lucide-react';
 
-export default function SecuritySection() {
+interface SecuritySectionProps {
+    missingFields?: string[];
+}
+
+export default function SecuritySection({ missingFields = [] }: SecuritySectionProps) {
     const { register, watch, setValue } = useFormContext();
 
     const allowedIps = watch('security.allowed_ips') || [];
@@ -21,6 +25,17 @@ export default function SecuritySection() {
         const newIps = [...allowedIps];
         newIps[index] = value;
         setValue('security.allowed_ips', newIps);
+    };
+
+    const getInputClass = (fieldName: string) => {
+        const baseClass = "w-full px-3 py-2 border rounded-lg focus:ring-2 text-slate-900 placeholder-slate-400 bg-white transition-colors";
+        const isMissing = missingFields.includes(fieldName);
+
+        if (isMissing) {
+            return `${baseClass} border-red-300 bg-red-50 focus:ring-red-500 focus:border-red-500`;
+        }
+
+        return `${baseClass} border-slate-300 focus:ring-blue-500 focus:border-blue-500`;
     };
 
     return (
@@ -62,7 +77,7 @@ export default function SecuritySection() {
                                     value={ip}
                                     onChange={(e) => updateIp(index, e.target.value)}
                                     placeholder="192.168.1.0/24 or 10.0.0.1"
-                                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 placeholder-slate-400 bg-white"
                                 />
                                 {allowedIps.length > 1 && (
                                     <button
@@ -106,7 +121,7 @@ export default function SecuritySection() {
                         {...register('security.max_connections', { valueAsNumber: true })}
                         placeholder="5"
                         min="1"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={getInputClass('security.max_connections')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         Prevent resource exhaustion. 5-10 connections typical for two-party linkage.
@@ -124,7 +139,7 @@ export default function SecuritySection() {
                         placeholder="100"
                         min="1"
                         max="10000"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={getInputClass('security.rate_limit.requests_per_minute')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         Maximum requests allowed per minute from each IP address
@@ -142,7 +157,7 @@ export default function SecuritySection() {
                         placeholder="10"
                         min="1"
                         max="1000"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={getInputClass('security.rate_limit.burst_size')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         Maximum requests allowed in a burst

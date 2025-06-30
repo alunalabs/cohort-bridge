@@ -3,8 +3,23 @@
 import { useFormContext } from 'react-hook-form';
 import { Network } from 'lucide-react';
 
-export default function PeerSection() {
+interface PeerSectionProps {
+    missingFields?: string[];
+}
+
+export default function PeerSection({ missingFields = [] }: PeerSectionProps) {
     const { register } = useFormContext();
+
+    const getInputClass = (fieldName: string, extraClasses = "") => {
+        const baseClass = "w-full px-3 py-2 border rounded-lg focus:ring-2 text-slate-900 placeholder-slate-400 bg-white transition-colors";
+        const isMissing = missingFields.includes(fieldName);
+
+        if (isMissing) {
+            return `${baseClass} border-red-300 bg-red-50 focus:ring-red-500 focus:border-red-500 ${extraClasses}`;
+        }
+
+        return `${baseClass} border-slate-300 focus:ring-blue-500 focus:border-blue-500 ${extraClasses}`;
+    };
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
@@ -24,13 +39,16 @@ export default function PeerSection() {
                 {/* Peer Host */}
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Peer Host
+                        Peer Host <span className="text-red-500">*</span>
+                        {missingFields.includes('peer.host') && (
+                            <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                        )}
                     </label>
                     <input
                         type="text"
                         {...register('peer.host')}
                         placeholder="localhost or 192.168.1.100"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={getInputClass('peer.host')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         IP address (e.g., 192.168.1.100) or hostname of the other party in the linkage
@@ -40,7 +58,10 @@ export default function PeerSection() {
                 {/* Peer Port */}
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Peer Port
+                        Peer Port <span className="text-red-500">*</span>
+                        {missingFields.includes('peer.port') && (
+                            <span className="text-red-500 text-xs ml-2">(Required field missing)</span>
+                        )}
                     </label>
                     <input
                         type="number"
@@ -48,7 +69,7 @@ export default function PeerSection() {
                         placeholder="8081"
                         min="1"
                         max="65535"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={getInputClass('peer.port')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         Port where the peer system is listening. Coordinate this with the other party.
@@ -66,7 +87,7 @@ export default function PeerSection() {
                         placeholder="8080"
                         min="1"
                         max="65535"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className={getInputClass('listen_port')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         Port for incoming connections on this system. Must be available and not blocked by firewall.
@@ -82,7 +103,7 @@ export default function PeerSection() {
                         type="text"
                         {...register('private_key')}
                         placeholder="Leave empty to auto-generate"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                        className={getInputClass('private_key', 'font-mono text-sm')}
                     />
                     <p className="mt-1 text-xs text-slate-600">
                         64-character hex key for encryption. Auto-generated if empty. Save this for reuse.
