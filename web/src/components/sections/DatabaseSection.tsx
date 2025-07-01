@@ -1,70 +1,62 @@
 'use client';
 
 import { useFormContext } from 'react-hook-form';
-import { Database, Plus, Minus, Settings, Info } from 'lucide-react';
+import { Database, Plus, Minus, Info } from 'lucide-react';
+import { useEffect } from 'react';
 
 interface DatabaseSectionProps {
     configType: string;
     missingFields?: string[];
 }
 
+interface FieldMapping {
+    column: string;
+    normalization: string;
+}
+
 export default function DatabaseSection({ configType, missingFields = [] }: DatabaseSectionProps) {
     const { register, watch, setValue } = useFormContext();
 
     const databaseType = watch('database.type');
-    const fields = watch('database.fields') || [];
-    const normalization = watch('database.normalization') || [];
+    const fieldMappings = watch('database.field_mappings') || [];
     const isTokenized = watch('database.is_tokenized');
 
-    const addField = () => {
-        setValue('database.fields', [...fields, '']);
+    // Initialize with default fields and normalizations on first load
+    useEffect(() => {
+        if (fieldMappings.length === 0 && !isTokenized) {
+            const defaultMappings = [
+                { column: 'first_name', normalization: 'name' },
+                { column: 'last_name', normalization: 'name' },
+                { column: 'date_of_birth', normalization: 'date' },
+                { column: 'gender', normalization: 'gender' },
+                { column: 'zip_code', normalization: 'zip' }
+            ];
+            setValue('database.field_mappings', defaultMappings);
+        }
+    }, [fieldMappings.length, isTokenized, setValue]);
+
+    const addFieldMapping = () => {
+        setValue('database.field_mappings', [...fieldMappings, { column: '', normalization: '' }]);
     };
 
-    const removeField = (index: number) => {
-        const newFields = fields.filter((_: any, i: number) => i !== index);
-        setValue('database.fields', newFields);
+    const removeFieldMapping = (index: number) => {
+        const newMappings = fieldMappings.filter((_: any, i: number) => i !== index);
+        setValue('database.field_mappings', newMappings);
     };
 
-    const updateField = (index: number, value: string) => {
-        const newFields = [...fields];
-        newFields[index] = value;
-        setValue('database.fields', newFields);
-    };
-
-    // Normalization functions
-    const addNormalizationRule = () => {
-        setValue('database.normalization', [...normalization, '']);
-    };
-
-    const removeNormalizationRule = (index: number) => {
-        const newNormalization = normalization.filter((_: string, i: number) => i !== index);
-        setValue('database.normalization', newNormalization);
-    };
-
-    const updateNormalizationRule = (index: number, value: string) => {
-        const newNormalization = [...normalization];
-        newNormalization[index] = value;
-        setValue('database.normalization', newNormalization);
+    const updateFieldMapping = (index: number, field: 'column' | 'normalization', value: string) => {
+        const newMappings = [...fieldMappings];
+        newMappings[index] = { ...newMappings[index], [field]: value };
+        setValue('database.field_mappings', newMappings);
     };
 
     const normalizationMethods = [
+        { value: '', label: 'No normalization', description: 'Use data as-is' },
         { value: 'name', label: 'Name', description: 'Lowercase, remove punctuation, normalize spaces' },
         { value: 'date', label: 'Date', description: 'Standardize to YYYY-MM-DD format' },
         { value: 'gender', label: 'Gender', description: 'Standardize to single characters (m/f/nb/o/u)' },
-        { value: 'zip', label: 'ZIP', description: 'Extract first 5 digits, remove non-numeric' }
+        { value: 'zip', label: 'ZIP Code', description: 'Extract first 5 digits, remove non-numeric' }
     ];
-
-    const parseNormalizationRule = (rule: string) => {
-        const parts = rule.split(':');
-        return {
-            method: parts[0] || '',
-            field: parts[1] || ''
-        };
-    };
-
-    const createNormalizationRule = (method: string, field: string) => {
-        return method && field ? `${method}:${field}` : '';
-    };
 
     const getInputClass = (fieldName: string) => {
         const baseClass = "w-full px-3 py-2 border rounded-lg focus:ring-2 text-slate-900 placeholder-slate-400 bg-white transition-colors";
@@ -87,7 +79,7 @@ export default function DatabaseSection({ configType, missingFields = [] }: Data
                     <h3 className="text-lg font-semibold text-slate-900">Database Configuration</h3>
                 </div>
                 <p className="text-sm text-slate-600 ml-11">
-                    Configure your data source, field mappings, and normalization for privacy-preserving record linkage.
+                    Configure your data source and field mappings with normalization for privacy-preserving record linkage.
                 </p>
             </div>
 
@@ -269,21 +261,21 @@ export default function DatabaseSection({ configType, missingFields = [] }: Data
                     </div>
                 )}
 
-                {/* Fields Configuration */}
+                {/* Field Mapping with Normalization */}
                 {!isTokenized && (
                     <div>
-                        <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center justify-between mb-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-700">
-                                    Database Field Mapping
+                                    Field Mapping & Normalization
                                 </label>
                                 <p className="text-sm text-slate-600 mt-1">
-                                    Map your database column names to data types for record linkage
+                                    Map database columns to normalization methods for improved matching
                                 </p>
                             </div>
                             <button
                                 type="button"
-                                onClick={addField}
+                                onClick={addFieldMapping}
                                 className="flex items-center space-x-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
                             >
                                 <Plus className="h-4 w-4" />
@@ -291,246 +283,85 @@ export default function DatabaseSection({ configType, missingFields = [] }: Data
                             </button>
                         </div>
 
-                        <div className="space-y-3">
-                            {fields.map((field: string, index: number) => {
-                                const fieldLabels = [
-                                    'First Name Column',
-                                    'Last Name Column',
-                                    'Date of Birth Column',
-                                    'Gender Column',
-                                    'ZIP Code Column',
-                                    'Email Column',
-                                    'ID Column',
-                                    'Phone Column'
-                                ];
-
-                                return (
-                                    <div key={index} className="flex items-center space-x-3">
-                                        <div className="flex-1">
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">
-                                                {fieldLabels[index] || `Field ${index + 1} Column`}
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={field}
-                                                onChange={(e) => updateField(index, e.target.value)}
-                                                placeholder={`${fieldLabels[index]?.split(' ')[0].toLowerCase() || 'field'}_name`}
-                                                className={getInputClass(`database.fields.${index}`)}
-                                            />
-                                        </div>
-                                        {fields.length > 1 && (
-                                            <button
-                                                type="button"
-                                                onClick={() => removeField(index)}
-                                                className="mt-6 p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                                            >
-                                                <Minus className="h-4 w-4" />
-                                            </button>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
-                {/* Data Normalization Section */}
-                {!isTokenized && fields.length > 0 && (
-                    <div className="border-t border-slate-200 pt-6">
-                        <div className="mb-6">
-                            <div className="flex items-center space-x-3 mb-2">
-                                <div className="w-6 h-6 bg-purple-100 rounded-lg flex items-center justify-center">
-                                    <Settings className="h-3 w-3 text-purple-600" />
-                                </div>
-                                <h4 className="text-md font-medium text-slate-900">Data Normalization</h4>
-                            </div>
-                            <p className="text-sm text-slate-600 ml-9">
-                                Configure automatic data normalization to improve matching accuracy. Fields are standardized before tokenization.
-                            </p>
-                        </div>
-
-                        {/* Info Box */}
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                        {/* Recommendation Note */}
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                             <div className="flex items-start space-x-3">
                                 <Info className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
                                 <div>
-                                    <h5 className="text-sm font-medium text-blue-900 mb-2">Normalization Benefits</h5>
-                                    <ul className="text-sm text-blue-800 space-y-1">
-                                        <li>• <strong>Name:</strong> &quot;Mary-Jane O&apos;Connor&quot; matches &quot;MARYJANE OCONNOR&quot;</li>
-                                        <li>• <strong>Date:</strong> &quot;12/25/2023&quot; matches &quot;2023-12-25&quot;</li>
-                                        <li>• <strong>ZIP:</strong> &quot;12345-6789&quot; matches &quot;12345 6789&quot;</li>
-                                        <li>• <strong>Gender:</strong> &quot;Female&quot; matches &quot;f&quot;</li>
-                                    </ul>
+                                    <h5 className="text-sm font-medium text-blue-900 mb-2">Recommended Token Order</h5>
+                                    <p className="text-sm text-blue-800 mb-2">
+                                        We recommend generating tokens in this order: <strong>first name, last name, date of birth, gender, ZIP code</strong>.
+                                        You can customize the order however you like, though we recommend placing additional fields at the end.
+                                    </p>
+                                    <p className="text-xs text-blue-700">
+                                        This order optimizes for the most common matching scenarios in healthcare record linkage.
+                                    </p>
                                 </div>
                             </div>
                         </div>
 
-                        <div>
-                            <div className="flex items-center justify-between mb-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700">
-                                        Normalization Rules
-                                    </label>
-                                    <p className="text-sm text-slate-600 mt-1">
-                                        Map your database fields to normalization methods for improved matching
-                                    </p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={addNormalizationRule}
-                                    className="flex items-center space-x-1 text-purple-600 hover:text-purple-700 text-sm font-medium"
-                                >
-                                    <Plus className="h-4 w-4" />
-                                    <span>Add Rule</span>
-                                </button>
-                            </div>
+                        <div className="flex-1 grid grid-cols-2 pr-8">
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                                Database Column Name
+                            </label>
+                            <label className="block text-xs font-medium text-slate-600 mb-1">
+                                Normalization Method
+                            </label>
+                        </div>
 
-                            {normalization.length === 0 && (
-                                <div className="text-center py-8 border-2 border-dashed border-slate-300 rounded-lg">
-                                    <Settings className="h-12 w-12 text-slate-400 mx-auto mb-3" />
-                                    <p className="text-slate-600 mb-2">No normalization rules configured</p>
-                                    <p className="text-sm text-slate-500 mb-4">
-                                        Set up normalization for: <strong>First Name → Last Name → Date of Birth → Gender → ZIP Code</strong>
-                                    </p>
-                                    <div className="flex justify-center space-x-3">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                // Auto-setup common normalizations in the preferred order
-                                                const commonSetup = [];
-
-                                                // 1. First Name
-                                                const firstNameField = fields.find((f: string) =>
-                                                    f.toLowerCase().includes('first') ||
-                                                    (f.toLowerCase().includes('name') && f.toLowerCase().includes('first')) ||
-                                                    f.toLowerCase() === 'first' ||
-                                                    f.toLowerCase() === 'fname'
-                                                );
-                                                if (firstNameField) {
-                                                    commonSetup.push(createNormalizationRule('name', firstNameField));
-                                                }
-
-                                                // 2. Last Name  
-                                                const lastNameField = fields.find((f: string) =>
-                                                    f.toLowerCase().includes('last') ||
-                                                    (f.toLowerCase().includes('name') && f.toLowerCase().includes('last')) ||
-                                                    f.toLowerCase() === 'last' ||
-                                                    f.toLowerCase() === 'lname' ||
-                                                    f.toLowerCase() === 'surname'
-                                                );
-                                                if (lastNameField) {
-                                                    commonSetup.push(createNormalizationRule('name', lastNameField));
-                                                }
-
-                                                // 3. Date of Birth
-                                                const dobField = fields.find((f: string) =>
-                                                    f.toLowerCase().includes('birth') ||
-                                                    f.toLowerCase().includes('dob') ||
-                                                    f.toLowerCase().includes('date') ||
-                                                    f.toLowerCase() === 'birthdate'
-                                                );
-                                                if (dobField) {
-                                                    commonSetup.push(createNormalizationRule('date', dobField));
-                                                }
-
-                                                // 4. Gender
-                                                const genderField = fields.find((f: string) =>
-                                                    f.toLowerCase().includes('gender') ||
-                                                    f.toLowerCase().includes('sex') ||
-                                                    f.toLowerCase() === 'gender' ||
-                                                    f.toLowerCase() === 'sex'
-                                                );
-                                                if (genderField) {
-                                                    commonSetup.push(createNormalizationRule('gender', genderField));
-                                                }
-
-                                                // 5. ZIP Code
-                                                const zipField = fields.find((f: string) =>
-                                                    f.toLowerCase().includes('zip') ||
-                                                    f.toLowerCase().includes('postal') ||
-                                                    f.toLowerCase() === 'zip' ||
-                                                    f.toLowerCase() === 'zipcode' ||
-                                                    f.toLowerCase() === 'zip_code'
-                                                );
-                                                if (zipField) {
-                                                    commonSetup.push(createNormalizationRule('zip', zipField));
-                                                }
-
-                                                if (commonSetup.length > 0) {
-                                                    setValue('database.normalization', commonSetup);
-                                                }
-                                            }}
-                                            className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg text-sm font-medium hover:from-purple-600 hover:to-blue-600 transition-all shadow-sm"
+                        <div className="space-y-3">
+                            {fieldMappings.map((mapping: FieldMapping, index: number) => (
+                                <div key={index} className="flex items-center space-x-3 bg-slate-50 rounded-lg">
+                                    <div className="flex-1 grid grid-cols-2 gap-3">
+                                        <input
+                                            type="text"
+                                            value={mapping.column}
+                                            onChange={(e) => updateFieldMapping(index, 'column', e.target.value)}
+                                            placeholder="column_name"
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 bg-white"
+                                        />
+                                        <select
+                                            value={mapping.normalization}
+                                            onChange={(e) => updateFieldMapping(index, 'normalization', e.target.value)}
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 bg-white"
                                         >
-                                            <Settings className="h-4 w-4 mr-2" />
-                                            Auto-Setup Common Fields
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={addNormalizationRule}
-                                            className="inline-flex items-center px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:border-slate-400 hover:text-slate-900 transition-colors bg-white"
-                                        >
-                                            <Plus className="h-4 w-4 mr-2" />
-                                            Add Custom Rule
-                                        </button>
+                                            {normalizationMethods.map(method => (
+                                                <option key={method.value} value={method.value}>
+                                                    {method.label}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
+                                    {fieldMappings.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => removeFieldMapping(index)}
+                                            className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                        >
+                                            <Minus className="h-4 w-4" />
+                                        </button>
+                                    )}
                                 </div>
-                            )}
+                            ))}
+                        </div>
 
-                            {normalization.length > 0 && (
-                                <div className="space-y-3">
-                                    {normalization.map((rule: string, index: number) => {
-                                        const parsed = parseNormalizationRule(rule);
-                                        return (
-                                            <div key={index} className="flex items-center space-x-3 p-4 bg-slate-50 rounded-lg">
-                                                <div className="flex-1 grid grid-cols-2 gap-3">
-                                                    <div>
-                                                        <label className="block text-xs font-medium text-slate-600 mb-1">
-                                                            Normalization Method
-                                                        </label>
-                                                        <select
-                                                            value={parsed.method}
-                                                            onChange={(e) => updateNormalizationRule(index, createNormalizationRule(e.target.value, parsed.field))}
-                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-slate-900 bg-white"
-                                                        >
-                                                            <option value="">Select method...</option>
-                                                            {normalizationMethods.map(method => (
-                                                                <option key={method.value} value={method.value}>
-                                                                    {method.label}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-xs font-medium text-slate-600 mb-1">
-                                                            Database Field
-                                                        </label>
-                                                        <select
-                                                            value={parsed.field}
-                                                            onChange={(e) => updateNormalizationRule(index, createNormalizationRule(parsed.method, e.target.value))}
-                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-slate-900 bg-white"
-                                                        >
-                                                            <option value="">Select field...</option>
-                                                            {fields.map((field: string, fieldIndex: number) => (
-                                                                <option key={fieldIndex} value={field}>
-                                                                    {field}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeNormalizationRule(index)}
-                                                    className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                                                >
-                                                    <Minus className="h-4 w-4" />
-                                                </button>
-                                            </div>
-                                        );
-                                    })}
+                        {/* Normalization Info */}
+                        <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
+                            <h6 className="text-sm font-medium text-slate-900 mb-2">Normalization Methods</h6>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-600">
+                                <div>
+                                    <strong>Name:</strong> Converts "Mary-Jane O'Connor" → "maryjane oconnor"
                                 </div>
-                            )}
+                                <div>
+                                    <strong>Date:</strong> Converts "12/25/2023" → "2023-12-25"
+                                </div>
+                                <div>
+                                    <strong>Gender:</strong> Converts "Female" → "f"
+                                </div>
+                                <div>
+                                    <strong>ZIP Code:</strong> Converts "12345-6789" → "12345"
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}

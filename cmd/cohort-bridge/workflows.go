@@ -1,816 +1,658 @@
 package main
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"encoding/csv"
-
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
+	"github.com/auroradata-ai/cohort-bridge/internal/match"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 	"github.com/auroradata-ai/cohort-bridge/internal/server"
 )
 
-// WorkflowConfig holds configuration for workflow execution
-type WorkflowConfig struct {
-	DebugMode      bool
-	PreserveFiles  bool
-	VerboseLogging bool
-	WorkspaceDir   string
-	Force          bool
+// IntersectionResult represents a computed intersection
+type IntersectionResult struct {
+	Matches []*match.MatchResult `json:"matches"`
+	Stats   IntersectionStats    `json:"stats"`
 }
 
-// runSenderWorkflow runs the sender-specific workflow with step-by-step confirmations
-func runSenderWorkflow(cfg *config.Config, force bool) {
-	fmt.Println("📤 Starting PPRL Sender Workflow")
-	fmt.Println("==================================")
-	fmt.Printf("Target: %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
-	fmt.Println("🔒 Using encrypted tokenization for maximum security")
-	fmt.Println()
-
-	// Create workflow config with debug mode detection
-	workflowCfg := &WorkflowConfig{
-		DebugMode:      isDebugMode(),
-		PreserveFiles:  isDebugMode(),
-		VerboseLogging: isDebugMode(),
-		WorkspaceDir:   "temp-sender",
-		Force:          force,
-	}
-
-	if workflowCfg.DebugMode {
-		fmt.Println("🐛 Debug mode enabled - temp files will be preserved")
-	}
-
-	// Create temp-sender directory
-	if err := createWorkspaceDirectory(workflowCfg.WorkspaceDir); err != nil {
-		log.Fatalf("Failed to create sender workspace: %v", err)
-	}
-
-	// Change to sender workspace
-	originalDir, _ := os.Getwd()
-	defer func() {
-		os.Chdir(originalDir)
-		if !workflowCfg.PreserveFiles {
-			cleanupTempFiles(workflowCfg.WorkspaceDir)
-		} else {
-			fmt.Printf("🐛 Debug mode: Temp files preserved in %s/\n", workflowCfg.WorkspaceDir)
-		}
-	}()
-	os.Chdir(workflowCfg.WorkspaceDir)
-
-	// STEP 1: Tokenization (if needed)
-	var tokenizedFile string
-	if cfg.Database.IsTokenized {
-		fmt.Println("📋 STEP 1: Using Pre-tokenized Data")
-		fmt.Printf("   ✓ Found tokenized data: %s\n", cfg.Database.Filename)
-		if cfg.Database.IsEncrypted {
-			fmt.Println("   🔒 Data is encrypted - will be automatically decrypted during processing")
-		}
-		tokenizedFile = filepath.Join("..", cfg.Database.Filename)
-	} else {
-		fmt.Println("🔧 STEP 1: Tokenizing Patient Data with Encryption")
-		fmt.Printf("   Input file: %s\n", cfg.Database.Filename)
-		fmt.Printf("   Fields: %s\n", joinFields(cfg.Database.Fields))
-		fmt.Println("   🔒 Output will be encrypted with AES-256-GCM")
-		fmt.Println()
-
-		var err error
-		tokenizedFile, err = performTokenizationStreamStep(cfg, workflowCfg)
-		if err != nil {
-			log.Fatalf("❌ Tokenization failed: %v", err)
-		}
-		fmt.Printf("   ✅ Encrypted tokenization complete: %s\n", tokenizedFile)
-	}
-
-	// Confirmation before network step
-	fmt.Println()
-	if !confirmStep("Ready to send tokens over network to receiver?", workflowCfg) {
-		fmt.Println("👋 Workflow cancelled by user")
-		return
-	}
-
-	// STEP 2: Send tokens over network
-	fmt.Println()
-	fmt.Println("📡 STEP 2: Sending Tokens Over Network")
-	fmt.Printf("   Connecting to receiver at %s:%d...\n", cfg.Peer.Host, cfg.Peer.Port)
-	fmt.Println("   🔄 This will send your tokenized data to the receiver")
-	fmt.Println("   ⏳ Waiting for receiver to be ready...")
-
-	intersectionFile, err := performNetworkSendStep(cfg, tokenizedFile, workflowCfg)
-	if err != nil {
-		log.Fatalf("❌ Network send failed: %v", err)
-	}
-	fmt.Println("   ✅ Tokens sent successfully!")
-
-	// Confirmation before intersection step
-	fmt.Println()
-	if !confirmStep("Ready to receive intersection results?", workflowCfg) {
-		fmt.Println("👋 Workflow cancelled by user")
-		return
-	}
-
-	// STEP 3: Receive intersection results
-	fmt.Println()
-	fmt.Println("🔍 STEP 3: Receiving Intersection Results")
-	fmt.Println("   ⏳ Waiting for receiver to compute intersection...")
-
-	finalResults, err := performReceiveIntersectionStep(cfg, intersectionFile, workflowCfg)
-	if err != nil {
-		log.Fatalf("❌ Failed to receive intersection: %v", err)
-	}
-	fmt.Println("   ✅ Intersection received!")
-
-	// Final confirmation
-	fmt.Println()
-	if !confirmStep("Ready to save final results?", workflowCfg) {
-		fmt.Println("👋 Workflow cancelled by user")
-		return
-	}
-
-	// STEP 4: Save final results
-	fmt.Println()
-	fmt.Println("💾 STEP 4: Saving Final Results")
-	if err := performSaveIntersectionStep(finalResults, workflowCfg); err != nil {
-		log.Fatalf("❌ Save failed: %v", err)
-	}
-
-	fmt.Println()
-	fmt.Println("🎉 SENDER WORKFLOW COMPLETED!")
-	fmt.Println("==============================")
-	fmt.Printf("📁 Results saved in: %s/out/\n", workflowCfg.WorkspaceDir)
-	if workflowCfg.DebugMode {
-		fmt.Printf("🐛 Debug files preserved in: %s/\n", workflowCfg.WorkspaceDir)
-	}
+// IntersectionStats provides statistics about the intersection
+type IntersectionStats struct {
+	TotalComparisons int     `json:"total_comparisons"`
+	MatchCount       int     `json:"match_count"`
+	MatchRate        float64 `json:"match_rate"`
+	ComputedAt       string  `json:"computed_at"`
 }
 
-// runReceiverWorkflow runs the receiver-specific workflow with step-by-step confirmations
-func runReceiverWorkflow(cfg *config.Config, force bool) {
-	fmt.Println("📥 Starting PPRL Receiver Workflow")
-	fmt.Println("==================================")
-	fmt.Printf("Listening on port: %d\n", cfg.ListenPort)
-	fmt.Println("🔒 Using encrypted tokenization for maximum security")
+// PeerMessage represents messages exchanged between peers
+type PeerMessage struct {
+	Type    string      `json:"type"`
+	Payload interface{} `json:"payload"`
+}
+
+// TokenData represents the tokenized data to be exchanged
+type TokenData struct {
+	Records map[string]TokenRecord `json:"records"`
+}
+
+// TokenRecord represents a single tokenized record
+type TokenRecord struct {
+	ID          string `json:"id"`
+	BloomFilter string `json:"bloom_filter"` // base64 encoded
+	MinHash     string `json:"minhash"`      // base64 encoded
+}
+
+// runUnifiedWorkflow implements the new unified peer-to-peer workflow
+func runUnifiedWorkflow(cfg *config.Config, force bool) {
+	fmt.Println("🔄 Starting Unified PPRL Peer-to-Peer Workflow")
+	fmt.Println("==============================================")
+	fmt.Printf("Local Dataset: %s\n", cfg.Database.Filename)
+	fmt.Printf("Peer Address: %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
+	fmt.Printf("Listen Port: %d\n", cfg.ListenPort)
 	fmt.Println()
 
-	// Create workflow config with debug mode detection
-	workflowCfg := &WorkflowConfig{
-		DebugMode:      isDebugMode(),
-		PreserveFiles:  isDebugMode(),
-		VerboseLogging: isDebugMode(),
-		WorkspaceDir:   "temp-receiver",
-		Force:          force,
+	// Create temp directory for this session
+	tempDir := fmt.Sprintf("temp-workflow-%d", time.Now().Unix())
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		log.Fatalf("Failed to create temp directory: %v", err)
 	}
-
-	if workflowCfg.DebugMode {
-		fmt.Println("🐛 Debug mode enabled - temp files will be preserved")
-	}
-
-	// Create temp-receiver directory
-	if err := createWorkspaceDirectory(workflowCfg.WorkspaceDir); err != nil {
-		log.Fatalf("Failed to create receiver workspace: %v", err)
-	}
-
-	// Change to receiver workspace
-	originalDir, _ := os.Getwd()
 	defer func() {
-		os.Chdir(originalDir)
-		if !workflowCfg.PreserveFiles {
-			cleanupTempFiles(workflowCfg.WorkspaceDir)
-		} else {
-			fmt.Printf("🐛 Debug mode: Temp files preserved in %s/\n", workflowCfg.WorkspaceDir)
+		if !isDebugMode() {
+			os.RemoveAll(tempDir)
 		}
 	}()
-	os.Chdir(workflowCfg.WorkspaceDir)
 
-	// STEP 1: Tokenization (if needed)
-	var tokenizedFile string
-	if cfg.Database.IsTokenized {
-		fmt.Println("📋 STEP 1: Using Pre-tokenized Data")
-		fmt.Printf("   ✓ Found tokenized data: %s\n", cfg.Database.Filename)
-		if strings.HasSuffix(cfg.Database.Filename, ".enc") {
-			fmt.Println("   🔒 Data is encrypted - will be automatically decrypted during processing")
-		}
-		tokenizedFile = filepath.Join("..", cfg.Database.Filename)
-	} else {
-		fmt.Println("🔧 STEP 1: Tokenizing Patient Data with Encryption")
-		fmt.Printf("   Input file: %s\n", cfg.Database.Filename)
-		fmt.Printf("   Fields: %s\n", joinFields(cfg.Database.Fields))
-		fmt.Println("   🔒 Output will be encrypted with AES-256-GCM")
-		fmt.Println()
+	// Change to temp directory
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tempDir)
 
-		var err error
-		tokenizedFile, err = performTokenizationStreamStep(cfg, workflowCfg)
-		if err != nil {
-			log.Fatalf("❌ Tokenization failed: %v", err)
-		}
-		fmt.Printf("   ✅ Encrypted tokenization complete: %s\n", tokenizedFile)
-	}
-
-	// Confirmation before network step
+	// STEP 1: Read the config file (already done)
+	fmt.Println("📋 STEP 1: Configuration Loaded")
+	fmt.Printf("   ✓ Config file processed successfully\n")
+	fmt.Printf("   ✓ Hamming threshold: %d\n", cfg.Matching.HammingThreshold)
+	fmt.Printf("   ✓ Jaccard threshold: %.3f\n", cfg.Matching.JaccardThreshold)
 	fmt.Println()
-	if !confirmStep("Ready to start network receiver and wait for sender?", workflowCfg) {
-		fmt.Println("👋 Workflow cancelled by user")
-		return
-	}
 
-	// STEP 2: Receive tokens over network
-	fmt.Println()
-	fmt.Println("📡 STEP 2: Receiving Tokens Over Network")
-	fmt.Printf("   Starting receiver on port %d...\n", cfg.ListenPort)
-	fmt.Println("   🔄 This will receive tokenized data from the sender")
-	fmt.Println("   ⏳ Waiting for sender to connect...")
-
-	receivedTokens, err := performNetworkReceiveStep(cfg, tokenizedFile, workflowCfg)
+	// STEP 2: Tokenize the dataset if not already tokenized
+	fmt.Println("🔧 STEP 2: Dataset Tokenization")
+	tokenizedFile, err := performTokenizationStep(cfg)
 	if err != nil {
-		log.Fatalf("❌ Network receive failed: %v", err)
+		log.Fatalf("❌ Tokenization failed: %v", err)
 	}
-	fmt.Println("   ✅ Tokens received successfully!")
-
-	// Confirmation before intersection step
+	fmt.Printf("   ✅ Tokenized data ready: %s\n", tokenizedFile)
 	fmt.Println()
-	if !confirmStep("Ready to compute intersection?", workflowCfg) {
+
+	// Confirmation
+	if !confirmStep("Ready to establish peer connection and exchange tokens?", force) {
 		fmt.Println("👋 Workflow cancelled by user")
 		return
 	}
 
-	// STEP 3: Compute intersection
-	fmt.Println()
-	fmt.Println("🔍 STEP 3: Computing Intersection")
-	fmt.Println("   🧮 Matching received tokens with local tokens...")
+	// STEP 3: Establish connection with peer
+	fmt.Println("📡 STEP 3: Establishing Peer Connection")
+	conn, isServer, err := establishPeerConnection(cfg)
+	if err != nil {
+		log.Fatalf("❌ Failed to establish peer connection: %v", err)
+	}
+	defer conn.Close()
 
-	intersectionFile, err := performComputeIntersectionStep(tokenizedFile, receivedTokens, workflowCfg)
+	if isServer {
+		fmt.Printf("   ✅ Connected as server (listening on port %d)\n", cfg.ListenPort)
+	} else {
+		fmt.Printf("   ✅ Connected as client to %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
+	}
+	fmt.Println()
+
+	// STEP 4: Exchange tokens with peer
+	fmt.Println("🔄 STEP 4: Token Exchange")
+	localTokens, peerTokens, err := exchangeTokens(conn, tokenizedFile, isServer)
+	if err != nil {
+		log.Fatalf("❌ Token exchange failed: %v", err)
+	}
+	fmt.Printf("   ✅ Local tokens: %d records\n", len(localTokens.Records))
+	fmt.Printf("   ✅ Peer tokens: %d records\n", len(peerTokens.Records))
+	fmt.Println()
+
+	// STEP 5: Compute intersection using thresholds from config
+	fmt.Println("🔍 STEP 5: Computing Intersection")
+	intersection, err := computeIntersection(localTokens, peerTokens, cfg)
 	if err != nil {
 		log.Fatalf("❌ Intersection computation failed: %v", err)
 	}
-	fmt.Println("   ✅ Intersection computed!")
+	fmt.Printf("   ✅ Found %d matches from %d comparisons\n",
+		intersection.Stats.MatchCount, intersection.Stats.TotalComparisons)
 
-	// Final confirmation
+	// Save local intersection
+	localIntersectionFile := "local_intersection.json"
+	if err := saveWorkflowIntersectionResults(intersection, localIntersectionFile); err != nil {
+		log.Fatalf("❌ Failed to save local intersection: %v", err)
+	}
+	fmt.Printf("   ✅ Local intersection saved: %s\n", localIntersectionFile)
 	fmt.Println()
-	if !confirmStep("Ready to save final results and send back to sender?", workflowCfg) {
-		fmt.Println("👋 Workflow cancelled by user")
-		return
-	}
 
-	// STEP 4: Save and send results
+	// STEP 6: Exchange intersection results for comparison
+	fmt.Println("🔄 STEP 6: Exchanging Intersection Results")
+	peerIntersection, err := exchangeIntersectionResults(conn, intersection, isServer)
+	if err != nil {
+		log.Fatalf("❌ Intersection exchange failed: %v", err)
+	}
+	fmt.Printf("   ✅ Received peer intersection (%d matches)\n", peerIntersection.Stats.MatchCount)
 	fmt.Println()
-	fmt.Println("💾 STEP 4: Saving Results and Sending to Sender")
-	if err := performSaveAndSendResultsStep(intersectionFile, cfg, workflowCfg); err != nil {
-		log.Fatalf("❌ Save and send failed: %v", err)
+
+	// STEP 7: Compare results and create diff if needed
+	fmt.Println("⚖️  STEP 7: Comparing Intersection Results")
+	resultsMatch, diffFile, err := compareIntersectionResults(intersection, peerIntersection)
+	if err != nil {
+		log.Fatalf("❌ Result comparison failed: %v", err)
 	}
 
-	fmt.Println()
-	fmt.Println("🎉 RECEIVER WORKFLOW COMPLETED!")
-	fmt.Println("===============================")
-	fmt.Printf("📁 Results saved in: %s/out/\n", workflowCfg.WorkspaceDir)
-	if workflowCfg.DebugMode {
-		fmt.Printf("🐛 Debug files preserved in: %s/\n", workflowCfg.WorkspaceDir)
-	}
-}
+	if resultsMatch {
+		fmt.Println("   ✅ SUCCESS: Intersection results match between peers!")
+		fmt.Println("   🎉 Both peers computed identical intersections")
 
-// runOrchestrationWorkflow runs the complete PPRL workflow
-func runOrchestrationWorkflow(cfg *config.Config, force bool) {
-	fmt.Println("🔄 Starting complete PPRL orchestration workflow")
-
-	workflowCfg := &WorkflowConfig{
-		DebugMode:      isDebugMode(),
-		PreserveFiles:  isDebugMode(),
-		VerboseLogging: isDebugMode(),
-		WorkspaceDir:   "temp-orchestration",
-		Force:          force,
-	}
-
-	if workflowCfg.DebugMode {
-		fmt.Println("🐛 Debug mode enabled - temp files will be preserved")
-	}
-
-	// This workflow assumes we have two datasets to compare locally
-	fmt.Println("\n📝 Step 1: Tokenizing datasets...")
-	if err := performTokenizationStep(cfg, workflowCfg); err != nil {
-		log.Fatalf("Tokenization failed: %v", err)
-	}
-
-	fmt.Println("\n🔍 Step 2: Computing intersection...")
-	if err := performIntersectionStep(cfg, workflowCfg); err != nil {
-		log.Fatalf("Intersection failed: %v", err)
-	}
-
-	fmt.Println("\n📊 Step 3: Generating results...")
-	if err := performResultsStep(cfg, workflowCfg); err != nil {
-		log.Fatalf("Results generation failed: %v", err)
-	}
-
-	fmt.Println("\n✅ PPRL orchestration completed successfully!")
-}
-
-// Helper functions that use the existing CLI commands
-func createWorkspaceDirectory(name string) error {
-	// Create the workspace directory
-	fmt.Printf("📁 Creating workspace: %s/\n", name)
-	if err := os.MkdirAll(name, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", name, err)
-	}
-
-	// Create subdirectories for organization
-	subdirs := []string{"out", "logs", "temp", "tokens"}
-	for _, subdir := range subdirs {
-		path := filepath.Join(name, subdir)
-		if err := os.MkdirAll(path, 0755); err != nil {
-			return fmt.Errorf("failed to create subdirectory %s: %w", path, err)
-		}
-	}
-
-	return nil
-}
-
-// New workflow step functions implementing the correct pipeline
-
-func performTokenizationStreamStep(cfg *config.Config, workflowCfg *WorkflowConfig) (string, error) {
-	var tokenizedFile string
-
-	if cfg.Database.IsTokenized {
-		// Use existing tokenized data
-		tokenizedFile = filepath.Join("..", cfg.Database.Filename)
-		if workflowCfg.VerboseLogging {
-			fmt.Printf("      Using existing tokenized data: %s\n", cfg.Database.Filename)
+		// Copy results to output directory
+		if err := copyToOutput(localIntersectionFile, "intersection_results.json"); err != nil {
+			fmt.Printf("   ⚠️  Warning: Failed to copy results to output: %v\n", err)
+		} else {
+			fmt.Printf("   📁 Results saved to: out/intersection_results.json\n")
 		}
 	} else {
-		// Tokenize the data using the new encryption-enabled tokenization
-		// Default to encrypted output for security
-		tokenizedFile = "tokens/tokenized_data.csv.enc"
+		fmt.Println("   ❌ ERROR: Intersection results DO NOT match between peers!")
+		fmt.Printf("   📋 Diff file created: %s\n", diffFile)
 
-		// Use the tokenize command with encryption enabled by default
-		tokenizeArgs := []string{
-			"-input", filepath.Join("..", cfg.Database.Filename),
-			"-output", tokenizedFile,
-			"-main-config", filepath.Join("..", "config.yaml"), // Use config for field names
-			"-force", // Skip confirmations in workflow mode
-		}
-
-		if workflowCfg.VerboseLogging {
-			fmt.Printf("      Encrypted tokenization: %s -> %s\n", cfg.Database.Filename, tokenizedFile)
-			fmt.Printf("      Fields: %s\n", joinFields(cfg.Database.Fields))
+		// Copy diff to output directory
+		if err := copyToOutput(diffFile, "intersection_diff.json"); err != nil {
+			fmt.Printf("   ⚠️  Warning: Failed to copy diff to output: %v\n", err)
 		} else {
-			fmt.Printf("      Tokenizing %s (encrypted)...\n", cfg.Database.Filename)
+			fmt.Printf("   📁 Diff saved to: out/intersection_diff.json\n")
 		}
 
-		if err := runTokenizeCommandReal(tokenizeArgs, workflowCfg); err != nil {
-			return "", fmt.Errorf("tokenization failed: %v", err)
-		}
+		log.Fatalf("❌ Workflow failed: Intersection results do not match")
+	}
 
-		// Verify the encrypted file and its key were created
-		keyFile := strings.TrimSuffix(tokenizedFile, ".enc") + ".key"
-		if _, err := os.Stat(tokenizedFile); err != nil {
-			return "", fmt.Errorf("encrypted tokenized file not created: %v", err)
-		}
-		if _, err := os.Stat(keyFile); err != nil {
-			return "", fmt.Errorf("encryption key file not created: %v", err)
-		}
+	fmt.Println()
+	fmt.Println("🎉 UNIFIED PPRL WORKFLOW COMPLETED SUCCESSFULLY!")
+	fmt.Println("==============================================")
+	fmt.Printf("📁 Results available in: out/\n")
+	if isDebugMode() {
+		fmt.Printf("🐛 Debug files preserved in: %s/\n", tempDir)
+	}
+}
 
-		if workflowCfg.VerboseLogging {
-			fmt.Printf("      ✅ Encrypted tokenization complete: %s\n", tokenizedFile)
-			fmt.Printf("      🗝️  Encryption key: %s\n", keyFile)
-		}
+// performTokenizationStep handles tokenization if needed
+func performTokenizationStep(cfg *config.Config) (string, error) {
+	if cfg.Database.IsTokenized {
+		fmt.Printf("   ✓ Using pre-tokenized data: %s\n", cfg.Database.Filename)
+		return filepath.Join("..", cfg.Database.Filename), nil
+	}
+
+	fmt.Printf("   🔧 Tokenizing dataset: %s\n", cfg.Database.Filename)
+	fmt.Printf("   📋 Fields: %s\n", strings.Join(cfg.Database.Fields, ", "))
+
+	tokenizedFile := "tokenized_data.csv"
+
+	// Use the same tokenization logic as the tokenize command
+	tokenizeArgs := []string{
+		"-input", filepath.Join("..", cfg.Database.Filename),
+		"-output", tokenizedFile,
+		"-main-config", filepath.Join("..", "config.yaml"),
+		"-force",         // Skip confirmations
+		"-no-encryption", // For simplicity in workflow mode
+	}
+
+	if err := runTokenizeCommandInternal(tokenizeArgs, cfg.Database.Fields); err != nil {
+		return "", fmt.Errorf("tokenization failed: %v", err)
 	}
 
 	return tokenizedFile, nil
 }
 
-func performSendTokensStep(cfg *config.Config, tokenizedFile string, workflowCfg *WorkflowConfig) (string, error) {
-	// Send tokens to peer and get intersection back
-	intersectionFile := "temp/intersection_results.csv"
+// establishPeerConnection creates a connection between peers
+func establishPeerConnection(cfg *config.Config) (net.Conn, bool, error) {
+	// First try to connect as client
+	address := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
+	fmt.Printf("   🔄 Attempting to connect to peer at %s...\n", address)
 
-	if workflowCfg.VerboseLogging {
-		fmt.Printf("      Connecting to %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
-		fmt.Printf("      Sending tokens: %s\n", tokenizedFile)
+	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	if err == nil {
+		fmt.Printf("   ✅ Connected as client to %s\n", address)
+		return conn, false, nil
+	}
+
+	fmt.Printf("   ⚠️  Client connection failed, starting server mode...\n")
+
+	// If client connection fails, start as server
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ListenPort))
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to start server: %v", err)
+	}
+	defer listener.Close()
+
+	fmt.Printf("   🔄 Listening for peer connection on port %d...\n", cfg.ListenPort)
+
+	// Accept one connection
+	conn, err = listener.Accept()
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to accept connection: %v", err)
+	}
+
+	fmt.Printf("   ✅ Peer connected from %s\n", conn.RemoteAddr())
+	return conn, true, nil
+}
+
+// exchangeTokens handles the bidirectional token exchange
+func exchangeTokens(conn net.Conn, tokenizedFile string, isServer bool) (*TokenData, *TokenData, error) {
+	encoder := json.NewEncoder(conn)
+	decoder := json.NewDecoder(conn)
+
+	// Load local tokens
+	localTokens, err := loadTokenizedData(tokenizedFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load local tokens: %v", err)
+	}
+
+	if isServer {
+		// Server: first receive, then send
+		fmt.Printf("   🔄 Receiving tokens from peer...\n")
+		var peerMessage PeerMessage
+		if err := decoder.Decode(&peerMessage); err != nil {
+			return nil, nil, fmt.Errorf("failed to receive peer tokens: %v", err)
+		}
+
+		if peerMessage.Type != "tokens" {
+			return nil, nil, fmt.Errorf("unexpected message type: %s", peerMessage.Type)
+		}
+
+		peerTokens := &TokenData{}
+		if err := mapToStruct(peerMessage.Payload, peerTokens); err != nil {
+			return nil, nil, fmt.Errorf("failed to parse peer tokens: %v", err)
+		}
+
+		fmt.Printf("   📨 Sending local tokens to peer...\n")
+		if err := encoder.Encode(PeerMessage{Type: "tokens", Payload: localTokens}); err != nil {
+			return nil, nil, fmt.Errorf("failed to send local tokens: %v", err)
+		}
+
+		return localTokens, peerTokens, nil
 	} else {
-		fmt.Printf("      Connecting to %s:%d...\n", cfg.Peer.Host, cfg.Peer.Port)
-	}
-
-	// Create a modified config for sender mode
-	senderCfg := *cfg
-	senderCfg.Database.IsTokenized = true
-	senderCfg.Database.Filename = tokenizedFile
-
-	// Adjust encryption key file path if it's relative
-	if senderCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(senderCfg.Database.EncryptionKeyFile) {
-		senderCfg.Database.EncryptionKeyFile = filepath.Join("..", senderCfg.Database.EncryptionKeyFile)
-	}
-
-	// Run sender with intersection collection
-	if err := runSenderWithIntersection(&senderCfg, intersectionFile, workflowCfg); err != nil {
-		return "", err
-	}
-
-	return intersectionFile, nil
-}
-
-func performReceiveTokensStep(cfg *config.Config, tokenizedFile string, workflowCfg *WorkflowConfig) (string, error) {
-	// Receive tokens from peer and create intersection
-	intersectionFile := "temp/intersection_results.csv"
-
-	if workflowCfg.VerboseLogging {
-		fmt.Printf("      Listening on port %d\n", cfg.ListenPort)
-		fmt.Printf("      Local tokens: %s\n", tokenizedFile)
-	} else {
-		fmt.Printf("      Listening on port %d...\n", cfg.ListenPort)
-	}
-
-	// Create a modified config for receiver mode
-	receiverCfg := *cfg
-	receiverCfg.Database.IsTokenized = true
-	receiverCfg.Database.Filename = tokenizedFile
-
-	// Adjust encryption key file path if it's relative
-	if receiverCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(receiverCfg.Database.EncryptionKeyFile) {
-		receiverCfg.Database.EncryptionKeyFile = filepath.Join("..", receiverCfg.Database.EncryptionKeyFile)
-	}
-
-	// Run receiver with intersection creation
-	if err := runReceiverWithIntersection(&receiverCfg, intersectionFile, workflowCfg); err != nil {
-		return "", err
-	}
-
-	return intersectionFile, nil
-}
-
-func performSaveIntersectionStep(intersectionFile string, workflowCfg *WorkflowConfig) error {
-	// Check if we have a real intersection file or just a completion indicator
-	if intersectionFile == "intersection_completed" {
-		// Create a summary file indicating successful network communication (fallback case)
-		summaryFile := "out/workflow_summary.txt"
-		summary := fmt.Sprintf("PPRL Sender Workflow completed at: %s\nNetwork communication: Successful\nMatching: Handled by receiver\n",
-			time.Now().Format("2006-01-02 15:04:05"))
-
-		if err := os.WriteFile(summaryFile, []byte(summary), 0644); err != nil {
-			return fmt.Errorf("failed to create summary: %v", err)
+		// Client: first send, then receive
+		fmt.Printf("   📨 Sending local tokens to peer...\n")
+		if err := encoder.Encode(PeerMessage{Type: "tokens", Payload: localTokens}); err != nil {
+			return nil, nil, fmt.Errorf("failed to send local tokens: %v", err)
 		}
 
-		fmt.Printf("      ✅ Workflow summary saved: %s\n", summaryFile)
-		return nil
-	}
-
-	// We have a real intersection file - verify it exists
-	if _, err := os.Stat(intersectionFile); err != nil {
-		return fmt.Errorf("intersection file not found: %v", err)
-	}
-
-	// The intersection file already exists in the correct location (out/intersection_results.csv)
-	// No need to copy it if it's already in the right place
-	if intersectionFile != "out/intersection_results.csv" {
-		// Copy to the standard output location
-		outputFile := "out/intersection_results.csv"
-		if workflowCfg.VerboseLogging {
-			fmt.Printf("      Copying intersection: %s -> %s\n", intersectionFile, outputFile)
+		fmt.Printf("   🔄 Receiving tokens from peer...\n")
+		var peerMessage PeerMessage
+		if err := decoder.Decode(&peerMessage); err != nil {
+			return nil, nil, fmt.Errorf("failed to receive peer tokens: %v", err)
 		}
 
-		if err := copyFile(intersectionFile, outputFile); err != nil {
-			return fmt.Errorf("failed to copy intersection: %v", err)
+		if peerMessage.Type != "tokens" {
+			return nil, nil, fmt.Errorf("unexpected message type: %s", peerMessage.Type)
 		}
+
+		peerTokens := &TokenData{}
+		if err := mapToStruct(peerMessage.Payload, peerTokens); err != nil {
+			return nil, nil, fmt.Errorf("failed to parse peer tokens: %v", err)
+		}
+
+		return localTokens, peerTokens, nil
 	}
-
-	// Create summary file with workflow info
-	summaryFile := "out/workflow_summary.txt"
-	summary := fmt.Sprintf("PPRL Workflow completed at: %s\nIntersection results: %s\n",
-		time.Now().Format("2006-01-02 15:04:05"), "out/intersection_results.csv")
-
-	if err := os.WriteFile(summaryFile, []byte(summary), 0644); err != nil {
-		return fmt.Errorf("failed to create summary: %v", err)
-	}
-
-	fmt.Printf("      ✅ Intersection results ready: out/intersection_results.csv\n")
-	return nil
 }
 
-// User confirmation helper function
-func confirmStep(message string, workflowCfg *WorkflowConfig) bool {
-	if workflowCfg.Force {
-		fmt.Printf("🚀 %s (auto-confirmed with force flag)\n", message)
-		return true
+// loadTokenizedData loads tokenized data from a CSV file
+func loadTokenizedData(filename string) (*TokenData, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
 	}
 
-	options := []string{
-		"✅ Yes, continue",
-		"❌ Cancel workflow",
+	if len(records) < 2 { // Header + at least one record
+		return nil, fmt.Errorf("insufficient data in tokenized file")
 	}
 
-	choice := promptForChoice(message, options)
-	return choice == 0 // First option is "Yes, continue"
+	tokenData := &TokenData{Records: make(map[string]TokenRecord)}
+
+	// Skip header row
+	for i := 1; i < len(records); i++ {
+		record := records[i]
+		if len(record) < 4 {
+			continue // Skip incomplete records
+		}
+
+		tokenRecord := TokenRecord{
+			ID:          record[0],
+			BloomFilter: record[1],
+			MinHash:     record[2],
+		}
+
+		tokenData.Records[tokenRecord.ID] = tokenRecord
+	}
+
+	return tokenData, nil
 }
 
-// Network-based workflow step functions for proper PPRL communication
+// computeIntersection computes the intersection using the same logic as validate.go
+func computeIntersection(localTokens, peerTokens *TokenData, cfg *config.Config) (*IntersectionResult, error) {
+	fmt.Printf("   🔧 Using Hamming threshold: %d\n", cfg.Matching.HammingThreshold)
+	fmt.Printf("   📈 Using Jaccard threshold: %.3f\n", cfg.Matching.JaccardThreshold)
 
-func performNetworkSendStep(cfg *config.Config, tokenizedFile string, workflowCfg *WorkflowConfig) (string, error) {
-	// This function sends tokens over the network using the actual sender functionality
-
-	// Create a modified config for network sending
-	senderCfg := *cfg
-	senderCfg.Database.IsTokenized = true
-	senderCfg.Database.Filename = tokenizedFile
-
-	// Adjust encryption key file path if it's relative
-	if senderCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(senderCfg.Database.EncryptionKeyFile) {
-		senderCfg.Database.EncryptionKeyFile = filepath.Join("..", senderCfg.Database.EncryptionKeyFile)
+	// Convert TokenData to PatientRecords for matching
+	localRecords, err := tokenDataToPatientRecords(localTokens)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert local tokens: %v", err)
 	}
 
-	fmt.Printf("      Attempting to connect to %s:%d...\n", senderCfg.Peer.Host, senderCfg.Peer.Port)
-	fmt.Println("      📡 Starting network send (this will BLOCK until receiver responds)...")
-
-	// This ACTUALLY sends tokenized data to the receiver over TCP
-	// IMPORTANT: This will BLOCK until the receiver processes data and responds
-	// The sender now ALSO saves intersection results locally
-	server.RunAsSender(&senderCfg)
-
-	// Check if the sender created intersection files
-	intersectionFile := "out/intersection_results.csv"
-	if _, err := os.Stat(intersectionFile); err == nil {
-		fmt.Printf("      ✅ Network communication completed - intersection saved: %s\n", intersectionFile)
-		return intersectionFile, nil
+	peerRecords, err := tokenDataToPatientRecords(peerTokens)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert peer tokens: %v", err)
 	}
 
-	// If no intersection file found, network communication may have failed
-	return "", fmt.Errorf("network send failed - no intersection file created")
+	// Perform matching using the same logic as validate.go
+	matches, allComparisons, err := runWorkflowMatchingPipeline(
+		localRecords,
+		peerRecords,
+		uint32(cfg.Matching.HammingThreshold),
+		cfg.Matching.JaccardThreshold,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("matching pipeline failed: %v", err)
+	}
+
+	// Create intersection result
+	result := &IntersectionResult{
+		Matches: matches,
+		Stats: IntersectionStats{
+			TotalComparisons: len(allComparisons),
+			MatchCount:       len(matches),
+			MatchRate:        float64(len(matches)) / float64(len(allComparisons)),
+			ComputedAt:       time.Now().Format(time.RFC3339),
+		},
+	}
+
+	return result, nil
 }
 
-func performReceiveIntersectionStep(cfg *config.Config, sendResultFile string, workflowCfg *WorkflowConfig) (string, error) {
-	// The sender now creates intersection files during network communication
-	// We need to verify the intersection file was created successfully
+// tokenDataToPatientRecords converts TokenData to PatientRecords for matching
+func tokenDataToPatientRecords(tokenData *TokenData) ([]server.PatientRecord, error) {
+	var records []server.PatientRecord
 
-	// Check if we received a valid intersection file path
-	if sendResultFile == "" {
-		return "", fmt.Errorf("no intersection file path provided")
+	for _, tokenRecord := range tokenData.Records {
+		// Decode Bloom filter from base64
+		bf, err := pprl.BloomFromBase64(tokenRecord.BloomFilter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode bloom filter for %s: %v", tokenRecord.ID, err)
+		}
+
+		// Decode MinHash from base64
+		mh, err := pprl.MinHashFromBase64(tokenRecord.MinHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode minhash for %s: %v", tokenRecord.ID, err)
+		}
+
+		record := server.PatientRecord{
+			ID:          tokenRecord.ID,
+			BloomFilter: bf,
+			MinHash:     mh,
+		}
+
+		records = append(records, record)
 	}
 
-	// Verify the file actually exists and has content
-	if info, err := os.Stat(sendResultFile); err != nil {
-		return "", fmt.Errorf("intersection file not found: %v", err)
-	} else if info.Size() == 0 {
-		return "", fmt.Errorf("intersection file is empty - no matches found")
-	}
-
-	// File exists and has content
-	fmt.Printf("      ✅ Intersection results available: %s\n", sendResultFile)
-	return sendResultFile, nil
+	return records, nil
 }
 
-func performNetworkReceiveStep(cfg *config.Config, tokenizedFile string, workflowCfg *WorkflowConfig) (string, error) {
-	// This function receives tokens over the network using the actual receiver functionality
+// runWorkflowMatchingPipeline performs the intersection computation (copied from validate.go)
+func runWorkflowMatchingPipeline(records1, records2 []server.PatientRecord, hammingThreshold uint32, jaccardThreshold float64) ([]*match.MatchResult, []*match.MatchResult, error) {
+	fmt.Println("   🔄 Computing pairwise comparisons...")
 
-	// Create a modified config for network receiving
-	receiverCfg := *cfg
-	receiverCfg.Database.IsTokenized = true
-	receiverCfg.Database.Filename = tokenizedFile
+	var allComparisons []*match.MatchResult
+	var matches []*match.MatchResult
 
-	// Adjust encryption key file path if it's relative
-	if receiverCfg.Database.EncryptionKeyFile != "" && !filepath.IsAbs(receiverCfg.Database.EncryptionKeyFile) {
-		receiverCfg.Database.EncryptionKeyFile = filepath.Join("..", receiverCfg.Database.EncryptionKeyFile)
-	}
+	totalComparisons := 0
 
-	// Clear any existing output files before starting
-	outputFiles := []string{
-		"out/matches.csv",
-		"out/intersection_results.csv",
-	}
-	for _, file := range outputFiles {
-		os.Remove(file) // Clean slate
-	}
+	// Perform all pairwise comparisons
+	for _, record1 := range records1 {
+		for _, record2 := range records2 {
+			totalComparisons++
 
-	fmt.Printf("      Starting receiver server on port %d...\n", receiverCfg.ListenPort)
-	fmt.Println("      ⏳ BLOCKING until sender connects and sends REAL data...")
-	fmt.Println("      💡 This will wait indefinitely until a sender connects")
+			// Calculate Hamming distance
+			hammingDist, err := record1.BloomFilter.HammingDistance(record2.BloomFilter)
+			if err != nil {
+				continue // Skip this comparison on error
+			}
 
-	// Create a channel to monitor for actual output files being created
-	done := make(chan string, 1)
-	go func() {
-		// Monitor for output files being created
-		for {
-			for _, file := range outputFiles {
-				if info, err := os.Stat(file); err == nil && info.Size() > 0 {
-					done <- file
-					return
+			// Calculate match score
+			bfSize := record1.BloomFilter.GetSize()
+			matchScore := 1.0
+			if hammingDist > 0 {
+				matchScore = 1.0 - (float64(hammingDist) / float64(bfSize))
+			}
+
+			// Calculate Jaccard similarity
+			var jaccardSim float64
+			if record1.MinHash != nil && record2.MinHash != nil {
+				sig1, err1 := record1.MinHash.ComputeSignature(record1.BloomFilter)
+				sig2, err2 := record2.MinHash.ComputeSignature(record2.BloomFilter)
+				if err1 == nil && err2 == nil {
+					jaccardSim, _ = pprl.JaccardSimilarity(sig1, sig2)
 				}
 			}
-			time.Sleep(1 * time.Second)
-		}
-	}()
 
-	// Start the receiver in a goroutine
-	go func() {
-		// This will BLOCK until a sender connects and sends REAL data
-		server.RunAsReceiver(&receiverCfg)
-	}()
+			// Determine if this is a match using BOTH thresholds
+			isMatch := hammingDist <= hammingThreshold && jaccardSim >= jaccardThreshold
 
-	// Wait for either results or timeout
-	select {
-	case resultFile := <-done:
-		fmt.Printf("      ✅ Real network data received and processed - results: %s\n", resultFile)
-		return resultFile, nil
-	case <-time.After(10 * time.Minute): // Longer timeout for network operations
-		return "", fmt.Errorf("network receive timed out - no sender connected within 10 minutes")
-	}
-}
+			// Create match result
+			matchResult := &match.MatchResult{
+				ID1:               record1.ID,
+				ID2:               record2.ID,
+				HammingDistance:   hammingDist,
+				JaccardSimilarity: jaccardSim,
+				MatchScore:        matchScore,
+				IsMatch:           isMatch,
+			}
 
-func performComputeIntersectionStep(localTokens, receivedTokens string, workflowCfg *WorkflowConfig) (string, error) {
-	// The intersection should already be computed by the server during network communication
-	// We should not create dummy data here
+			allComparisons = append(allComparisons, matchResult)
 
-	if workflowCfg.VerboseLogging {
-		fmt.Printf("      Local tokens: %s\n", localTokens)
-		fmt.Printf("      Network result: %s\n", receivedTokens)
-	}
-
-	// Verify we have a real file path, not a placeholder string
-	if receivedTokens == "" || strings.Contains(receivedTokens, "real_network") {
-		return "", fmt.Errorf("no real intersection computed - network communication failed")
-	}
-
-	// Verify the file exists and has content
-	if info, err := os.Stat(receivedTokens); err != nil {
-		return "", fmt.Errorf("intersection file not found: %v", err)
-	} else if info.Size() == 0 {
-		return "", fmt.Errorf("intersection file is empty - no matches found or computation failed")
-	}
-
-	fmt.Printf("      ✅ Using real intersection results: %s\n", receivedTokens)
-	return receivedTokens, nil
-}
-
-func performSaveAndSendResultsStep(intersectionFile string, cfg *config.Config, workflowCfg *WorkflowConfig) error {
-	// Save the REAL results locally
-	if err := performSaveIntersectionStep(intersectionFile, workflowCfg); err != nil {
-		return fmt.Errorf("failed to save real results locally: %v", err)
-	}
-
-	// The results have already been sent back during network communication
-	// The server handles bidirectional communication automatically
-	fmt.Println("   ✅ Real intersection results saved!")
-	return nil
-}
-
-// Utility functions for debug mode and file management
-
-func isDebugMode() bool {
-	// Check if debug mode is enabled via environment variable
-	if os.Getenv("COHORT_DEBUG") == "1" || os.Getenv("COHORT_DEBUG") == "true" {
-		return true
-	}
-
-	// Check command line args for debug flag
-	for _, arg := range os.Args {
-		if arg == "-debug" || arg == "--debug" {
-			return true
+			// Add to matches if it meets threshold
+			if matchResult.IsMatch {
+				matches = append(matches, matchResult)
+			}
 		}
 	}
 
-	return false
+	fmt.Printf("   ✅ Completed %d comparisons, found %d matches\n", len(allComparisons), len(matches))
+	return matches, allComparisons, nil
 }
 
-func cleanupTempFiles(workspaceDir string) {
-	tempDirs := []string{"temp", "tokens"}
-	for _, dir := range tempDirs {
-		tempPath := filepath.Join(workspaceDir, dir)
-		if err := os.RemoveAll(tempPath); err != nil {
-			// Only warn, don't fail the workflow
-			fmt.Printf("      Warning: Failed to cleanup %s: %v\n", tempPath, err)
+// exchangeIntersectionResults exchanges intersection results between peers
+func exchangeIntersectionResults(conn net.Conn, localIntersection *IntersectionResult, isServer bool) (*IntersectionResult, error) {
+	encoder := json.NewEncoder(conn)
+	decoder := json.NewDecoder(conn)
+
+	if isServer {
+		// Server: first receive, then send
+		fmt.Printf("   🔄 Receiving intersection from peer...\n")
+		var peerMessage PeerMessage
+		if err := decoder.Decode(&peerMessage); err != nil {
+			return nil, fmt.Errorf("failed to receive peer intersection: %v", err)
 		}
+
+		if peerMessage.Type != "intersection" {
+			return nil, fmt.Errorf("unexpected message type: %s", peerMessage.Type)
+		}
+
+		peerIntersection := &IntersectionResult{}
+		if err := mapToStruct(peerMessage.Payload, peerIntersection); err != nil {
+			return nil, fmt.Errorf("failed to parse peer intersection: %v", err)
+		}
+
+		fmt.Printf("   📨 Sending local intersection to peer...\n")
+		if err := encoder.Encode(PeerMessage{Type: "intersection", Payload: localIntersection}); err != nil {
+			return nil, fmt.Errorf("failed to send local intersection: %v", err)
+		}
+
+		return peerIntersection, nil
+	} else {
+		// Client: first send, then receive
+		fmt.Printf("   📨 Sending local intersection to peer...\n")
+		if err := encoder.Encode(PeerMessage{Type: "intersection", Payload: localIntersection}); err != nil {
+			return nil, fmt.Errorf("failed to send local intersection: %v", err)
+		}
+
+		fmt.Printf("   🔄 Receiving intersection from peer...\n")
+		var peerMessage PeerMessage
+		if err := decoder.Decode(&peerMessage); err != nil {
+			return nil, fmt.Errorf("failed to receive peer intersection: %v", err)
+		}
+
+		if peerMessage.Type != "intersection" {
+			return nil, fmt.Errorf("unexpected message type: %s", peerMessage.Type)
+		}
+
+		peerIntersection := &IntersectionResult{}
+		if err := mapToStruct(peerMessage.Payload, peerIntersection); err != nil {
+			return nil, fmt.Errorf("failed to parse peer intersection: %v", err)
+		}
+
+		return peerIntersection, nil
 	}
 }
 
-func copyFile(src, dst string) error {
-	sourceFile, err := os.ReadFile(src)
+// compareIntersectionResults compares two intersection results and creates a diff if they don't match
+func compareIntersectionResults(local, peer *IntersectionResult) (bool, string, error) {
+	// Compare basic stats
+	if local.Stats.MatchCount != peer.Stats.MatchCount {
+		fmt.Printf("   ❌ Match count differs: local=%d, peer=%d\n",
+			local.Stats.MatchCount, peer.Stats.MatchCount)
+	}
+
+	if local.Stats.TotalComparisons != peer.Stats.TotalComparisons {
+		fmt.Printf("   ❌ Total comparisons differ: local=%d, peer=%d\n",
+			local.Stats.TotalComparisons, peer.Stats.TotalComparisons)
+	}
+
+	// Create sorted match sets for comparison
+	localMatches := createMatchSet(local.Matches)
+	peerMatches := createMatchSet(peer.Matches)
+
+	// Find differences
+	onlyInLocal := make(map[string]*match.MatchResult)
+	onlyInPeer := make(map[string]*match.MatchResult)
+
+	for key, match := range localMatches {
+		if _, exists := peerMatches[key]; !exists {
+			onlyInLocal[key] = match
+		}
+	}
+
+	for key, match := range peerMatches {
+		if _, exists := localMatches[key]; !exists {
+			onlyInPeer[key] = match
+		}
+	}
+
+	// Check if results match
+	resultsMatch := len(onlyInLocal) == 0 && len(onlyInPeer) == 0 &&
+		local.Stats.MatchCount == peer.Stats.MatchCount
+
+	if resultsMatch {
+		return true, "", nil
+	}
+
+	// Create diff file
+	diffFile := "intersection_diff.json"
+	diff := map[string]interface{}{
+		"summary": map[string]interface{}{
+			"matches":             resultsMatch,
+			"local_match_count":   local.Stats.MatchCount,
+			"peer_match_count":    peer.Stats.MatchCount,
+			"local_comparisons":   local.Stats.TotalComparisons,
+			"peer_comparisons":    peer.Stats.TotalComparisons,
+			"only_in_local_count": len(onlyInLocal),
+			"only_in_peer_count":  len(onlyInPeer),
+		},
+		"only_in_local": onlyInLocal,
+		"only_in_peer":  onlyInPeer,
+		"created_at":    time.Now().Format(time.RFC3339),
+	}
+
+	if err := saveJSONFile(diff, diffFile); err != nil {
+		return false, "", fmt.Errorf("failed to save diff file: %v", err)
+	}
+
+	return false, diffFile, nil
+}
+
+// createMatchSet creates a map of matches keyed by a canonical string representation
+func createMatchSet(matches []*match.MatchResult) map[string]*match.MatchResult {
+	matchSet := make(map[string]*match.MatchResult)
+	for _, match := range matches {
+		if match.IsMatch {
+			// Create canonical key (ensure consistent ordering)
+			var key string
+			if match.ID1 < match.ID2 {
+				key = fmt.Sprintf("%s<->%s", match.ID1, match.ID2)
+			} else {
+				key = fmt.Sprintf("%s<->%s", match.ID2, match.ID1)
+			}
+			matchSet[key] = match
+		}
+	}
+	return matchSet
+}
+
+// saveWorkflowIntersectionResults saves intersection results to a JSON file
+func saveWorkflowIntersectionResults(intersection *IntersectionResult, filename string) error {
+	return saveJSONFile(intersection, filename)
+}
+
+// saveJSONFile saves any object to a JSON file
+func saveJSONFile(obj interface{}, filename string) error {
+	file, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, sourceFile, 0644)
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(obj)
 }
 
-func runTokenizeCommandReal(args []string, workflowCfg *WorkflowConfig) error {
-	// Save current stdout to restore later
-	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
-
-	// Set args for tokenize command - this will call the actual tokenize command with encryption
-	os.Args = append([]string{"cohort-bridge", "tokenize"}, args...)
-
-	// Call the actual tokenize command directly
-	runTokenizeCommand(args)
-
-	return nil
-}
-
-func runSenderWithIntersection(cfg *config.Config, intersectionFile string, workflowCfg *WorkflowConfig) error {
-	// Run sender and collect intersection results
-	done := make(chan error, 1)
-
-	go func() {
-		// Call the actual sender function but capture intersection results
-		server.RunAsSender(cfg)
-
-		// After sender completes, create intersection file from results
-		if err := createIntersectionFromResults("out", intersectionFile); err != nil {
-			done <- fmt.Errorf("failed to create intersection: %v", err)
-			return
-		}
-
-		done <- nil
-	}()
-
-	// Wait for completion with timeout
-	select {
-	case err := <-done:
-		if err != nil {
-			return err
-		}
-		if !workflowCfg.VerboseLogging {
-			fmt.Println("      ✓ Tokens sent and intersection received")
-		}
-		return nil
-	case <-time.After(60 * time.Second):
-		return fmt.Errorf("sender operation timed out")
-	}
-}
-
-func runReceiverWithIntersection(cfg *config.Config, intersectionFile string, workflowCfg *WorkflowConfig) error {
-	// Run receiver and create intersection results
-	done := make(chan error, 1)
-
-	go func() {
-		// Call the actual receiver function but exit after one session
-		server.RunAsReceiver(cfg)
-
-		// After receiver completes, create intersection file from results
-		if err := createIntersectionFromResults("out", intersectionFile); err != nil {
-			done <- fmt.Errorf("failed to create intersection: %v", err)
-			return
-		}
-
-		done <- nil
-	}()
-
-	// Wait for completion with timeout
-	select {
-	case err := <-done:
-		if err != nil {
-			return err
-		}
-		if !workflowCfg.VerboseLogging {
-			fmt.Println("      ✓ Tokens received and intersection created")
-		}
-		return nil
-	case <-time.After(5 * time.Minute):
-		return fmt.Errorf("receiver operation timed out")
-	}
-}
-
-func createIntersectionFromResults(resultsDir, intersectionFile string) error {
-	// Find the most recent results file and convert it to intersection format
-	files, err := filepath.Glob(filepath.Join(resultsDir, "matches_*.csv"))
+// mapToStruct converts a map[string]interface{} to a struct
+func mapToStruct(data interface{}, target interface{}) error {
+	// Convert to JSON and back to properly handle the type conversion
+	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-
-	if len(files) == 0 {
-		// Create empty intersection file if no matches found
-		return os.WriteFile(intersectionFile, []byte("id1,id2,score\n"), 0644)
-	}
-
-	// Use the most recent match file as intersection
-	latestFile := files[len(files)-1]
-	return copyFile(latestFile, intersectionFile)
+	return json.Unmarshal(jsonData, target)
 }
 
-// Helper functions for workflow implementation
-func joinFields(fields []string) string {
-	if len(fields) == 0 {
-		return ""
-	}
-	result := fields[0]
-	for i := 1; i < len(fields); i++ {
-		result += "," + fields[i]
-	}
-	return result
-}
+// runTokenizeCommandInternal performs tokenization (simplified version of tokenize.go logic)
+func runTokenizeCommandInternal(args []string, fields []string) error {
+	var inputFile, outputFile string
 
-func runTokenizeCommandSilent(args []string) error {
-	// Save current stdout to restore later
-	oldArgs := os.Args
-	defer func() { os.Args = oldArgs }()
-
-	// Set args for tokenize command
-	os.Args = append([]string{"cohort-bridge", "tokenize"}, args...)
-
-	// Call the tokenize command directly
-	return runTokenizeCommandInternal(args)
-}
-
-func runTokenizeCommandInternal(args []string) error {
-	// Parse the arguments manually
-	var inputFile, outputFile, format, fields string
-
+	// Parse args
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-input":
@@ -823,16 +665,6 @@ func runTokenizeCommandInternal(args []string) error {
 				outputFile = args[i+1]
 				i++
 			}
-		case "-format":
-			if i+1 < len(args) {
-				format = args[i+1]
-				i++
-			}
-		case "-fields":
-			if i+1 < len(args) {
-				fields = args[i+1]
-				i++
-			}
 		}
 	}
 
@@ -840,25 +672,11 @@ func runTokenizeCommandInternal(args []string) error {
 		return fmt.Errorf("input and output files are required")
 	}
 
-	if format == "" {
-		format = "csv"
-	}
-
-	// Parse fields string into slice
-	var fieldList []string
-	if fields != "" {
-		fieldList = strings.Split(fields, ",")
-	} else {
-		// Default fields if none specified
-		fieldList = []string{"first_name", "last_name", "dob"}
-	}
-
-	fmt.Printf("      Tokenizing %s -> %s (format: %s, fields: %s)...\n", inputFile, outputFile, format, fields)
-
-	// Call the REAL tokenization function that creates actual Bloom filters and MinHash
-	return performRealTokenization(inputFile, outputFile, fieldList)
+	// Use the existing tokenization logic
+	return performRealTokenization(inputFile, outputFile, fields)
 }
 
+// performRealTokenization (copied from existing workflows.go)
 func performRealTokenization(inputFile, outputFile string, fields []string) error {
 	// Read input CSV file
 	csvDB, err := db.NewCSVDatabase(inputFile)
@@ -871,8 +689,6 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 	if err != nil {
 		return fmt.Errorf("failed to read records: %w", err)
 	}
-
-	fmt.Printf("      Processing %d records...\n", len(allRecords))
 
 	// Create CSV output file with proper headers
 	outputCSV, err := os.Create(outputFile)
@@ -945,7 +761,7 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 			return fmt.Errorf("failed to compute MinHash signature for %s: %w", recordID, err)
 		}
 
-		// Convert to CSV format - NO ID for privacy!
+		// Convert to CSV format
 		timestamp := time.Now().Format("2006-01-02T15:04:05Z")
 
 		// Encode the complete MinHash object to base64
@@ -966,78 +782,91 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 		}
 
 		processedCount++
-		if processedCount%100 == 0 {
-			fmt.Printf("      Processed %d records...\n", processedCount)
+	}
+
+	return nil
+}
+
+// copyToOutput copies a file to the output directory
+func copyToOutput(srcFile, dstFile string) error {
+	// Ensure output directory exists
+	if err := os.MkdirAll("../out", 0755); err != nil {
+		return err
+	}
+
+	src, err := os.Open(srcFile)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(filepath.Join("../out", dstFile))
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	return err
+}
+
+// Utility functions
+
+func confirmStep(message string, force bool) bool {
+	if force {
+		fmt.Printf("🚀 %s (auto-confirmed with force flag)\n", message)
+		return true
+	}
+
+	options := []string{
+		"✅ Yes, continue",
+		"❌ Cancel PPRL",
+	}
+
+	choice := promptForChoice(message, options)
+	return choice == 0
+}
+
+func isDebugMode() bool {
+	if os.Getenv("COHORT_DEBUG") == "1" || os.Getenv("COHORT_DEBUG") == "true" {
+		return true
+	}
+
+	for _, arg := range os.Args {
+		if arg == "-debug" || arg == "--debug" {
+			return true
 		}
 	}
 
-	fmt.Printf("      ✅ Successfully tokenized %d records\n", processedCount)
-	return nil
+	return false
 }
 
-// formatMinHashForCSV converts MinHash signature to comma-separated string for CSV
-func formatMinHashForCSV(minHash []uint32) string {
-	var parts []string
-	for _, val := range minHash {
-		parts = append(parts, fmt.Sprintf("%d", val))
-	}
-	return strings.Join(parts, ",")
-}
-
-func performTokenizationStep(cfg *config.Config, workflowCfg *WorkflowConfig) error {
-	// Implementation would use the tokenize command for both datasets
-	fmt.Println("   🔧 Tokenizing datasets...")
-
-	// This is a placeholder - in practice, this would tokenize configured datasets
-	fmt.Println("   ✓ Datasets tokenized")
-	return nil
-}
-
-func performIntersectionStep(cfg *config.Config, workflowCfg *WorkflowConfig) error {
-	// Implementation would use the intersect command
-	fmt.Println("   🔍 Computing intersection...")
-
-	// This is a placeholder - in practice, this would use the intersect command
-	fmt.Println("   ✓ Intersection computed")
-	return nil
-}
-
-func performResultsStep(cfg *config.Config, workflowCfg *WorkflowConfig) error {
-	// Implementation would generate final CSV reports
-	fmt.Println("   📊 Generating results...")
-
-	// This is a placeholder - in practice, this would create result files
-	fmt.Println("   ✓ Results generated")
-	return nil
-}
-
-func runWorkflowsCommand(args []string) {
-	fmt.Println("⚙️  CohortBridge Workflow Orchestrator")
-	fmt.Println("=====================================")
-	fmt.Println("Orchestrate complex PPRL operations")
+// runPPRLCommand is the entry point for the pprl command
+func runPPRLCommand(args []string) {
+	fmt.Println("🔗 CohortBridge PPRL")
+	fmt.Println("===================")
+	fmt.Println("Peer-to-peer privacy-preserving record linkage")
 	fmt.Println()
 
-	fs := flag.NewFlagSet("workflows", flag.ExitOnError)
+	fs := flag.NewFlagSet("pprl", flag.ExitOnError)
 	var (
-		configFile   = fs.String("config", "", "Configuration file")
-		workflowType = fs.String("workflow", "", "Workflow type: sender, receiver, orchestration")
-		interactive  = fs.Bool("interactive", false, "Force interactive mode")
-		force        = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
-		help         = fs.Bool("help", false, "Show help message")
+		configFile  = fs.String("config", "", "Configuration file")
+		interactive = fs.Bool("interactive", false, "Force interactive mode")
+		force       = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
+		help        = fs.Bool("help", false, "Show help message")
 	)
 	fs.Parse(args)
 
 	if *help {
-		showWorkflowsHelp()
+		showPPRLHelp()
 		return
 	}
 
-	// If missing required parameters or interactive mode requested, go interactive
-	if *configFile == "" || *workflowType == "" || *interactive {
-		fmt.Println("🎯 Interactive Workflow Setup")
-		fmt.Println("Let's configure your workflow...\n")
+	// Interactive mode if missing config or requested
+	if *configFile == "" || *interactive {
+		fmt.Println("🎯 Interactive PPRL Setup")
+		fmt.Println("Let's configure your peer-to-peer record linkage...\n")
 
-		// Get configuration file
 		if *configFile == "" {
 			var err error
 			*configFile, err = selectDataFile("Select Configuration File", "config", []string{".yaml"})
@@ -1047,59 +876,29 @@ func runWorkflowsCommand(args []string) {
 			}
 		}
 
-		// Select workflow type
-		if *workflowType == "" {
-			workflowOptions := []string{
-				"📤 Sender - Send data to peer",
-				"📥 Receiver - Receive data from peer",
-				"🔄 Orchestration - Complete PPRL workflow",
-			}
-
-			workflowChoice := promptForChoice("Select workflow type:", workflowOptions)
-
-			switch workflowChoice {
-			case 0:
-				*workflowType = "sender"
-			case 1:
-				*workflowType = "receiver"
-			case 2:
-				*workflowType = "orchestration"
-			}
-		}
-
 		fmt.Println()
 	}
 
 	// Show configuration summary
-	fmt.Println("📋 Workflow Configuration:")
+	fmt.Println("📋 PPRL Configuration:")
 	fmt.Printf("  📁 Config File: %s\n", *configFile)
-	fmt.Printf("  ⚙️  Workflow Type: %s\n", *workflowType)
 	fmt.Println()
 
-	// Confirm before proceeding (unless force flag is set)
+	// Confirm before proceeding
 	if !*force {
 		confirmOptions := []string{
-			"✅ Yes, start workflow",
-			"⚙️  Change configuration",
+			"✅ Yes, start PPRL",
 			"❌ Cancel",
 		}
 
-		confirmChoice := promptForChoice("Ready to start workflow?", confirmOptions)
+		confirmChoice := promptForChoice("Ready to start peer-to-peer record linkage?", confirmOptions)
 
-		if confirmChoice == 2 { // Cancel
-			fmt.Println("\n👋 Workflow cancelled. Goodbye!")
+		if confirmChoice == 1 {
+			fmt.Println("\n👋 PPRL cancelled. Goodbye!")
 			os.Exit(0)
 		}
-
-		if confirmChoice == 1 { // Change configuration
-			// Restart configuration
-			fmt.Println("\n🔄 Restarting configuration...\n")
-			newArgs := append([]string{"-interactive"}, args...)
-			runWorkflowsCommand(newArgs)
-			return
-		}
 	} else {
-		fmt.Println("🚀 Starting workflow automatically (force mode)...")
+		fmt.Println("🚀 Starting PPRL automatically (force mode)...")
 	}
 
 	// Load configuration
@@ -1108,56 +907,64 @@ func runWorkflowsCommand(args []string) {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Run the selected workflow
-	fmt.Println("🚀 Starting workflow...\n")
-
-	switch *workflowType {
-	case "sender":
-		runSenderWorkflow(cfg, *force)
-	case "receiver":
-		runReceiverWorkflow(cfg, *force)
-	case "orchestration":
-		runOrchestrationWorkflow(cfg, *force)
-	default:
-		fmt.Printf("❌ Unknown workflow type: %s\n", *workflowType)
-		os.Exit(1)
+	// Validate config has required fields
+	if cfg.Peer.Host == "" || cfg.Peer.Port == 0 {
+		log.Fatalf("Configuration missing peer connection details (peer.host and peer.port)")
 	}
+
+	if cfg.ListenPort == 0 {
+		log.Fatalf("Configuration missing listen_port")
+	}
+
+	if cfg.Matching.HammingThreshold == 0 {
+		cfg.Matching.HammingThreshold = 20 // Default
+	}
+
+	if cfg.Matching.JaccardThreshold == 0 {
+		cfg.Matching.JaccardThreshold = 0.5 // Default
+	}
+
+	// Run the PPRL workflow
+	fmt.Println("🚀 Starting PPRL workflow...\n")
+	runUnifiedWorkflow(cfg, *force)
 }
 
-func showWorkflowsHelp() {
-	fmt.Println("⚙️  CohortBridge Workflow Orchestrator")
-	fmt.Println("=====================================")
+func showPPRLHelp() {
+	fmt.Println("🔗 CohortBridge PPRL")
+	fmt.Println("===================")
 	fmt.Println()
-	fmt.Println("Orchestrate complex PPRL operations")
+	fmt.Println("PPRL STEPS:")
+	fmt.Println("  1. 📋 Read configuration file")
+	fmt.Println("  2. 🔧 Tokenize dataset (if not pre-tokenized)")
+	fmt.Println("  3. 📡 Establish peer connection")
+	fmt.Println("  4. 🔄 Exchange tokens with peer")
+	fmt.Println("  5. 🔍 Compute intersection using thresholds")
+	fmt.Println("  6. 🔄 Exchange intersection results")
+	fmt.Println("  7. ⚖️  Compare results and create diff if needed")
 	fmt.Println()
 	fmt.Println("USAGE:")
-	fmt.Println("  cohort-bridge workflows [OPTIONS]")
-	fmt.Println("  cohort-bridge workflows                  # Interactive mode")
+	fmt.Println("  cohort-bridge pprl [OPTIONS]")
+	fmt.Println("  cohort-bridge pprl                       # Interactive mode")
 	fmt.Println()
 	fmt.Println("OPTIONS:")
 	fmt.Println("  -config string     Configuration file")
-	fmt.Println("  -workflow string   Workflow type: sender, receiver, orchestration")
 	fmt.Println("  -interactive       Force interactive mode")
-	fmt.Println("  -force             Skip confirmation prompts and run automatically")
+	fmt.Println("  -force             Skip confirmation prompts")
 	fmt.Println("  -help              Show this help message")
 	fmt.Println()
-	fmt.Println("WORKFLOW TYPES:")
-	fmt.Println("  sender         📤 Send data to peer")
-	fmt.Println("  receiver       📥 Receive data from peer")
-	fmt.Println("  orchestration  🔄 Complete PPRL workflow")
-	fmt.Println()
 	fmt.Println("EXAMPLES:")
-	fmt.Println("  # Interactive mode (prompts for all inputs)")
-	fmt.Println("  cohort-bridge workflows")
+	fmt.Println("  # Interactive mode")
+	fmt.Println("  cohort-bridge pprl")
 	fmt.Println()
 	fmt.Println("  # Command line mode")
-	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow sender")
-	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow orchestration")
+	fmt.Println("  cohort-bridge pprl -config config.yaml")
 	fmt.Println()
 	fmt.Println("  # Automatic mode (skip confirmations)")
-	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow sender -force")
-	fmt.Println("  cohort-bridge workflows -config config.yaml -workflow receiver -force")
+	fmt.Println("  cohort-bridge pprl -config config.yaml -force")
 	fmt.Println()
-	fmt.Println("  # Force interactive even with some parameters")
-	fmt.Println("  cohort-bridge workflows -config config.yaml -interactive")
+	fmt.Println("CONFIGURATION REQUIREMENTS:")
+	fmt.Println("  - peer.host and peer.port (peer connection)")
+	fmt.Println("  - listen_port (local server port)")
+	fmt.Println("  - matching.hamming_threshold (default: 20)")
+	fmt.Println("  - matching.jaccard_threshold (default: 0.5)")
 }

@@ -465,7 +465,8 @@ func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingDat
 	matchesFound := 0
 
 	Info("Starting comprehensive fuzzy matching (connection %s)", connID)
-	Info("Using Hamming threshold: %d (distances <= %d will be matches)", fuzzyConfig.HammingThreshold, fuzzyConfig.HammingThreshold)
+	Info("Using Hamming threshold: %d (distances ≤ %d) and Jaccard threshold: %.3f (similarities ≥ %.3f) for matches",
+		fuzzyConfig.HammingThreshold, fuzzyConfig.HammingThreshold, fuzzyConfig.JaccardThreshold, fuzzyConfig.JaccardThreshold)
 
 	for _, receiverRecord := range pprlRecords {
 		for senderID, senderBloomData := range senderMatching.Records {
@@ -503,9 +504,9 @@ func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingDat
 			// For Bloom filters, use Hamming-based approximation for consistency
 			jaccardSim = 1.0 - (float64(hammingDist) / float64(bfSize))
 
-			// Determine if this is a match based on Hamming threshold ONLY (same as validate command)
-			// This is the KEY difference - validate command uses ONLY Hamming distance
-			isMatch := hammingDist <= fuzzyConfig.HammingThreshold
+			// Determine if this is a match based on BOTH thresholds (same as FuzzyMatcher)
+			// Fixed: Now properly uses both Hamming AND Jaccard thresholds
+			isMatch := hammingDist <= fuzzyConfig.HammingThreshold && jaccardSim >= fuzzyConfig.JaccardThreshold
 
 			// Create match result
 			matchResult := &match.MatchResult{
@@ -524,8 +525,8 @@ func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingDat
 
 				// Debug first few matches found
 				if matchesFound <= 5 {
-					Debug("Match #%d: %s <-> %s (Hamming: %d ≤ %d, Score: %.6f)",
-						matchesFound, receiverRecord.ID, senderID, hammingDist, fuzzyConfig.HammingThreshold, matchScore)
+					Debug("Match #%d: %s <-> %s (Hamming: %d ≤ %d, Jaccard: %.3f ≥ %.3f, Score: %.6f)",
+						matchesFound, receiverRecord.ID, senderID, hammingDist, fuzzyConfig.HammingThreshold, jaccardSim, fuzzyConfig.JaccardThreshold, matchScore)
 				}
 			}
 
@@ -537,8 +538,8 @@ func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingDat
 		}
 	}
 
-	Info("Completed %d comparisons, found %d matches for connection %s (using Hamming <= %d)",
-		totalComparisons, matchesFound, connID, fuzzyConfig.HammingThreshold)
+	Info("Completed %d comparisons, found %d matches for connection %s (using Hamming ≤ %d AND Jaccard ≥ %.3f)",
+		totalComparisons, matchesFound, connID, fuzzyConfig.HammingThreshold, fuzzyConfig.JaccardThreshold)
 
 	// Log sample of matches found for verification
 	if len(matchResults) > 0 {
@@ -550,7 +551,7 @@ func performFuzzyMatching(pprlRecords []*pprl.Record, senderMatching MatchingDat
 			Info("  %s->%s: Hamming=%d, Score=%.6f", match.ID1, match.ID2, match.HammingDistance, match.MatchScore)
 		}
 	} else {
-		Info("No matches found - consider increasing Hamming threshold if expected matches exist")
+		Info("No matches found - consider adjusting Hamming/Jaccard thresholds if expected matches exist")
 	}
 
 	return matchResults

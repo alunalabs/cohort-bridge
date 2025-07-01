@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -31,8 +30,8 @@ func main() {
 			runIntersectCommand(args)
 		case "validate":
 			runValidateCommand(args)
-		case "workflows":
-			runWorkflowsCommand(args)
+		case "pprl":
+			runPPRLCommand(args)
 		case "-help", "--help", "help":
 			showMainHelp()
 		case "-version", "--version", "version":
@@ -57,7 +56,7 @@ func runInteractiveMode() {
 		"🔓 Decrypt - Decrypt encrypted tokenized files",
 		"🔍 Intersect - Find matches between tokenized datasets",
 		"🔬 Validate - Test results against ground truth",
-		"⚙️  Workflows - Orchestrate complex PPRL operations",
+		"🔗 PPRL - Peer-to-peer privacy-preserving record linkage",
 		"❓ Help - Show detailed help information",
 		"🚪 Exit",
 	}
@@ -73,8 +72,8 @@ func runInteractiveMode() {
 		runIntersectCommand([]string{"-interactive"})
 	case 3: // Validate
 		runValidateCommand([]string{"-interactive"})
-	case 4: // Workflows
-		runWorkflowsCommand([]string{"-interactive"})
+	case 4: // PPRL
+		runPPRLCommand([]string{"-interactive"})
 	case 5: // Help
 		showMainHelp()
 	case 6: // Exit
@@ -83,27 +82,16 @@ func runInteractiveMode() {
 	}
 }
 
-// Simple text input with arrow key support for text editing
+// Simple text input using basic Go input methods
 func promptForInput(message, defaultValue string) string {
-	var prompt string
 	if defaultValue != "" {
-		prompt = fmt.Sprintf("%s (default: %s): ", message, defaultValue)
+		fmt.Printf("%s (default: %s): ", message, defaultValue)
 	} else {
-		prompt = fmt.Sprintf("%s: ", message)
+		fmt.Printf("%s: ", message)
 	}
-	fmt.Fprint(os.Stderr, prompt)
 
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		// Handle EOF or other read errors
-		if defaultValue != "" {
-			fmt.Printf("\nNo input received, using default: %s\n", defaultValue)
-			return defaultValue
-		}
-		fmt.Printf("\nNo input received and no default available\n")
-		return ""
-	}
+	var input string
+	fmt.Scanln(&input)
 
 	input = strings.TrimSpace(input)
 	if input == "" && defaultValue != "" {
@@ -150,7 +138,7 @@ func showMainHelp() {
 	fmt.Println("  intersect   🔍 Find matches between tokenized datasets")
 	fmt.Println("  send        📡 Network operations for secure communication")
 	fmt.Println("  validate    🔬 Test results against ground truth")
-	fmt.Println("  workflows   ⚙️  Orchestrate complex PPRL operations")
+	fmt.Println("  pprl        🔗 Peer-to-peer privacy-preserving record linkage")
 	fmt.Println()
 	fmt.Println()
 	fmt.Println("GLOBAL OPTIONS:")

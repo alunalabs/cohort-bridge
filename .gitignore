@@ -42,6 +42,8 @@ drafts/
 *.temp
 temp/
 tmp/
+temp-receiver/
+temp-sender/
 
 # Output files
 *.csv
@@ -57,10 +59,9 @@ tmp/
 
 # testing
 cmd/test
-test_cohort_bridge.sh
-temp-receiver/
-temp-sender/
 *.sh
+threshold_test_results/
+threshold_tester.py
 
 # build files
 *.exe

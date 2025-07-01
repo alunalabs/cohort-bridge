@@ -330,9 +330,9 @@ func (m *StreamingMatcher) MatchBatchAgainstSender(
 			// For Bloom filters, use Hamming-based approximation for consistency
 			jaccardSim = 1.0 - (float64(hammingDist) / float64(bfSize))
 
-			// Determine if this is a match based on Hamming threshold ONLY (same as validate command)
-			// This is the KEY difference - validate command uses ONLY Hamming distance
-			isMatch := hammingDist <= m.config.HammingThreshold
+			// Determine if this is a match based on BOTH thresholds (same as FuzzyMatcher)
+			// Fixed: Now properly uses both Hamming AND Jaccard thresholds
+			isMatch := hammingDist <= m.config.HammingThreshold && jaccardSim >= m.config.JaccardThreshold
 
 			// Create match result
 			result := &match.MatchResult{
@@ -356,8 +356,8 @@ func (m *StreamingMatcher) MatchBatchAgainstSender(
 
 				// Debug first few matches found
 				if m.totalMatches <= 5 {
-					Debug("Match #%d: %s <-> %s (Hamming: %d ≤ %d, Score: %.6f)",
-						m.totalMatches, receiverRecord.ID, senderID, hammingDist, m.config.HammingThreshold, matchScore)
+					Debug("Match #%d: %s <-> %s (Hamming: %d ≤ %d, Jaccard: %.3f ≥ %.3f, Score: %.6f)",
+						m.totalMatches, receiverRecord.ID, senderID, hammingDist, m.config.HammingThreshold, jaccardSim, m.config.JaccardThreshold, matchScore)
 				}
 			}
 		}
@@ -365,10 +365,10 @@ func (m *StreamingMatcher) MatchBatchAgainstSender(
 
 	duration := time.Since(batchStart)
 	if m.config.EnableProgressLog {
-		Info("Batch %d: %d comparisons, %d matches in %v (avg: %v/comparison) - using Hamming <= %d",
+		Info("Batch %d: %d comparisons, %d matches in %v (avg: %v/comparison) - using Hamming ≤ %d AND Jaccard ≥ %.3f",
 			receiverBatch.Offset/m.config.BatchSize+1,
 			batchComparisons, batchMatches, duration,
-			duration/time.Duration(batchComparisons), m.config.HammingThreshold)
+			duration/time.Duration(batchComparisons), m.config.HammingThreshold, m.config.JaccardThreshold)
 	}
 
 	return nil

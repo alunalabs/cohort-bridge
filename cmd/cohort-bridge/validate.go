@@ -46,15 +46,16 @@ func runValidateCommand(args []string) {
 
 	fs := flag.NewFlagSet("validate", flag.ExitOnError)
 	var (
-		config1File     = fs.String("config1", "", "Configuration file for dataset 1 (Party A)")
-		config2File     = fs.String("config2", "", "Configuration file for dataset 2 (Party B)")
-		groundTruthFile = fs.String("ground-truth", "", "Ground truth file with expected matches")
-		outputFile      = fs.String("output", "", "Output CSV file for validation report")
-		matchThreshold  = fs.Uint("match-threshold", 20, "Hamming distance threshold for matches (default: 20)")
-		force           = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
-		verbose         = fs.Bool("verbose", false, "Verbose output with detailed analysis")
-		interactive     = fs.Bool("interactive", false, "Force interactive mode")
-		help            = fs.Bool("help", false, "Show help message")
+		config1File      = fs.String("config1", "", "Configuration file for dataset 1 (Party A)")
+		config2File      = fs.String("config2", "", "Configuration file for dataset 2 (Party B)")
+		groundTruthFile  = fs.String("ground-truth", "", "Ground truth file with expected matches")
+		outputFile       = fs.String("output", "", "Output CSV file for validation report")
+		matchThreshold   = fs.Uint("match-threshold", 20, "Hamming distance threshold for matches (default: 20)")
+		jaccardThreshold = fs.Float64("jaccard-threshold", 0.5, "Minimum Jaccard similarity for matches (default: 0.5)")
+		force            = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
+		verbose          = fs.Bool("verbose", false, "Verbose output with detailed analysis")
+		interactive      = fs.Bool("interactive", false, "Force interactive mode")
+		help             = fs.Bool("help", false, "Show help message")
 	)
 	fs.Parse(args)
 
@@ -64,7 +65,7 @@ func runValidateCommand(args []string) {
 	}
 
 	// If missing required parameters or interactive mode requested, go interactive
-	if *config1File == "" || *config2File == "" || *groundTruthFile == "" || *outputFile == "" || *interactive {
+	if (*config1File == "" || *config2File == "" || *groundTruthFile == "" || *outputFile == "") || *interactive {
 		fmt.Println("🎯 Interactive Validation Setup")
 		fmt.Println("Let's configure your validation parameters...")
 
@@ -106,8 +107,9 @@ func runValidateCommand(args []string) {
 
 		// Configure match threshold
 		fmt.Println("\n🎯 Matching Configuration")
+		fmt.Println("Configuring thresholds...")
 
-		thresholdChoice := promptForChoice("Select match threshold:", []string{
+		thresholdChoice := promptForChoice("Select Hamming distance threshold:", []string{
 			"🎯 20 - Default (recommended for good matches)",
 			"🔥 10 - Very strict matching",
 			"⚖️  30 - More lenient matching",
@@ -128,6 +130,31 @@ func runValidateCommand(args []string) {
 			} else {
 				fmt.Println("⚠️  Invalid threshold, using default: 20")
 				*matchThreshold = 20
+			}
+		}
+
+		// Configure Jaccard threshold
+		jaccardChoice := promptForChoice("Select Jaccard similarity threshold:", []string{
+			"📊 0.5 - Default (balanced matching)",
+			"🔥 0.8 - High similarity required",
+			"⚖️  0.3 - More lenient similarity",
+			"🔧 Custom - Enter custom value",
+		})
+
+		switch jaccardChoice {
+		case 0:
+			*jaccardThreshold = 0.5
+		case 1:
+			*jaccardThreshold = 0.8
+		case 2:
+			*jaccardThreshold = 0.3
+		case 3:
+			customJaccardResult := promptForInput("Enter custom Jaccard similarity threshold (0.0-1.0)", "0.5")
+			if val, err := strconv.ParseFloat(customJaccardResult, 64); err == nil && val >= 0.0 && val <= 1.0 {
+				*jaccardThreshold = val
+			} else {
+				fmt.Println("⚠️  Invalid Jaccard threshold, using default: 0.5")
+				*jaccardThreshold = 0.5
 			}
 		}
 
@@ -152,7 +179,8 @@ func runValidateCommand(args []string) {
 	fmt.Printf("  📁 Config 2 (Party B): %s\n", *config2File)
 	fmt.Printf("  📊 Ground Truth: %s\n", *groundTruthFile)
 	fmt.Printf("  📝 Output Report: %s\n", *outputFile)
-	fmt.Printf("  🎯 Match Threshold: %d\n", *matchThreshold)
+	fmt.Printf("  🎯 Hamming Threshold: %d\n", *matchThreshold)
+	fmt.Printf("  📈 Jaccard Threshold: %.3f\n", *jaccardThreshold)
 	if *verbose {
 		fmt.Println("  🔍 Mode: Verbose")
 	} else {
@@ -196,7 +224,7 @@ func runValidateCommand(args []string) {
 	// Run validation
 	fmt.Println("🚀 Starting validation process...")
 
-	if err := performValidation(*config1File, *config2File, *groundTruthFile, *outputFile, *matchThreshold, *verbose); err != nil {
+	if err := performValidation(*config1File, *config2File, *groundTruthFile, *outputFile, *matchThreshold, *jaccardThreshold, *verbose); err != nil {
 		fmt.Printf("❌ Validation failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -421,7 +449,7 @@ func validateValidationInputs(config1, config2, groundTruth string) error {
 	return nil
 }
 
-func performValidation(config1, config2, groundTruth, outputFile string, matchThreshold uint, verbose bool) error {
+func performValidation(config1, config2, groundTruth, outputFile string, matchThreshold uint, jaccardThreshold float64, verbose bool) error {
 	// Ensure output directory exists
 	if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
@@ -470,12 +498,13 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 
 	fmt.Println("🔄 Running PPRL matching pipeline...")
 	fmt.Printf("  🎯 Using Hamming threshold: %d\n", matchThreshold)
+	fmt.Printf("  📈 Using Jaccard threshold: %.3f\n", jaccardThreshold)
 
 	// Configure matching pipeline
 	pipelineConfig := &match.PipelineConfig{
 		FuzzyMatchConfig: &match.FuzzyMatchConfig{
 			HammingThreshold:  uint32(matchThreshold),
-			JaccardThreshold:  0.5, // Default Jaccard threshold
+			JaccardThreshold:  jaccardThreshold,
 			UseSecureProtocol: false,
 		},
 		OutputPath:    outputFile + ".matches", // Temporary file for matches
@@ -490,7 +519,7 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 	}
 
 	// Run matching
-	matches, allComparisons, err := runMatchingPipeline(records1, records2, pipeline, uint32(matchThreshold))
+	matches, allComparisons, err := runMatchingPipeline(records1, records2, pipeline, uint32(matchThreshold), jaccardThreshold)
 	if err != nil {
 		return fmt.Errorf("failed to run matching pipeline: %w", err)
 	}
@@ -581,7 +610,8 @@ func showValidateHelp() {
 	fmt.Println("  -config2 string       Configuration file for dataset 2 (Party B)")
 	fmt.Println("  -ground-truth string  Ground truth CSV file with expected matches")
 	fmt.Println("  -output string        Output CSV file for validation report")
-	fmt.Println("  -match-threshold      Hamming distance threshold for matches")
+	fmt.Println("  -match-threshold      Hamming distance threshold for matches (default: 20)")
+	fmt.Println("  -jaccard-threshold    Jaccard similarity threshold for matches (default: 0.5)")
 	fmt.Println("  -verbose              Verbose output with detailed analysis")
 	fmt.Println("  -interactive          Force interactive mode")
 	fmt.Println("  -force                Skip confirmation prompts and run automatically")
@@ -594,10 +624,12 @@ func showValidateHelp() {
 	fmt.Println("  # Command line mode")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -verbose")
+	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -match-threshold 15 -jaccard-threshold 0.8")
 	fmt.Println()
 	fmt.Println("  # Automatic mode (skip confirmations)")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -force")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -verbose -force")
+	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -config2 config_b.yaml -ground-truth data/expected_matches.csv -match-threshold 25 -jaccard-threshold 0.3 -force")
 	fmt.Println()
 	fmt.Println("  # Force interactive even with some parameters")
 	fmt.Println("  cohort-bridge validate -config1 config_a.yaml -interactive")
@@ -692,15 +724,16 @@ func loadDataset(cfg *config.Config, datasetName string) ([]server.PatientRecord
 	return records, nil
 }
 
-// runMatchingPipeline runs the PPRL matching pipeline
-func runMatchingPipeline(records1, records2 []server.PatientRecord, pipeline *match.Pipeline, hammingThreshold uint32) ([]*match.MatchResult, []*match.MatchResult, error) {
+// runMatchingPipeline runs the PPRL matching pipeline using both Hamming and Jaccard thresholds
+func runMatchingPipeline(records1, records2 []server.PatientRecord, pipeline *match.Pipeline, hammingThreshold uint32, jaccardThreshold float64) ([]*match.MatchResult, []*match.MatchResult, error) {
 	fmt.Println("   🔄 Computing pairwise comparisons...")
 
 	var allComparisons []*match.MatchResult
 	var matches []*match.MatchResult
 
 	totalComparisons := 0
-	fmt.Printf("   🔧 Using Hamming threshold: %d (distances <= %d will be matches)\n", hammingThreshold, hammingThreshold)
+	fmt.Printf("   🔧 Using Hamming threshold: %d (distances ≤ %d will be considered)\n", hammingThreshold, hammingThreshold)
+	fmt.Printf("   📈 Using Jaccard threshold: %.3f (similarities ≥ %.3f will be considered)\n", jaccardThreshold, jaccardThreshold)
 
 	// Perform all pairwise comparisons
 	for _, record1 := range records1 {
@@ -732,8 +765,8 @@ func runMatchingPipeline(records1, records2 []server.PatientRecord, pipeline *ma
 				}
 			}
 
-			// Determine if this is a match based on Hamming threshold ONLY (same as test command)
-			isMatch := hammingDist <= hammingThreshold
+			// Determine if this is a match using BOTH thresholds (same as FuzzyMatcher)
+			isMatch := hammingDist <= hammingThreshold && jaccardSim >= jaccardThreshold
 
 			// Create match result
 			matchResult := &match.MatchResult{
@@ -760,7 +793,7 @@ func runMatchingPipeline(records1, records2 []server.PatientRecord, pipeline *ma
 		}
 	}
 
-	fmt.Printf("   ✅ Completed %d comparisons, found %d matches (Hamming <= %d)\n", len(allComparisons), len(matches), hammingThreshold)
+	fmt.Printf("   ✅ Completed %d comparisons, found %d matches (Hamming ≤ %d AND Jaccard ≥ %.3f)\n", len(allComparisons), len(matches), hammingThreshold, jaccardThreshold)
 
 	// Debug sample of matches found
 	if len(matches) > 0 {
