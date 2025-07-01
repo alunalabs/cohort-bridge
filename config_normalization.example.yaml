@@ -1,0 +1,64 @@
+# Example configuration with normalization for cohort-bridge
+# Copy this file to config.yaml and modify the values as needed
+
+database:
+  type: csv
+  filename: data/patients.csv  # Path to your patient data CSV file
+  fields:
+    - FIRST        # Patient first name column
+    - LAST         # Patient last name column  
+    - DATE_OF_BIRTH # Date of birth column
+    - ZIP          # ZIP code column
+    - GENDER       # Gender column
+  # Normalization configuration
+  # Format: normalization_method:field_name
+  # Supported methods: name, date, gender, zip
+  normalization:
+    - name:FIRST        # Apply name normalization to FIRST field (lowercase, remove punctuation, normalize spaces)
+    - name:LAST         # Apply name normalization to LAST field 
+    - date:DATE_OF_BIRTH # Apply date normalization to DATE_OF_BIRTH field (standardize to YYYY-MM-DD)
+    - zip:ZIP           # Apply ZIP normalization to ZIP field (extract first 5 digits)
+    - gender:GENDER     # Apply gender normalization to GENDER field (standardize to m/f/nb/o/u)
+
+# Network configuration for peer-to-peer matching
+peer:
+  host: 127.0.0.1   # IP address of the peer to connect to
+  port: 8081        # Port number of the peer
+
+listen_port: 8082   # Port to listen on for incoming connections
+
+# Security configuration
+security:
+  allowed_ips:
+    - "127.0.0.1"
+    - "::1"
+  require_ip_check: true
+  max_connections: 10
+  rate_limit_per_min: 5
+
+# Timeout configuration
+timeouts:
+  connection_timeout: 30s
+  read_timeout: 60s
+  write_timeout: 60s
+  idle_timeout: 300s
+  handshake_timeout: 30s
+
+# Logging configuration
+logging:
+  level: "info"
+  file: "logs/cohort-bridge.log"
+  max_size: 100
+  max_backups: 3
+  max_age: 30
+  enable_audit: true
+  audit_file: "logs/audit.log"
+
+# Matching parameters
+matching:
+  hamming_threshold: 20      # Maximum Hamming distance for matches
+  jaccard_threshold: 0.7     # Minimum Jaccard similarity for matches
+
+# Cryptographic key for secure communications
+# Generate a new key for production use: openssl rand -hex 32
+private_key: YOUR_PRIVATE_KEY_HERE_32_HEX_CHARACTERS 

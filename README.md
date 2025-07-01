@@ -208,6 +208,38 @@ The business logic is implemented in modular internal packages:
 - **Secure Mode**: `config_secure.example.yaml`, `config_secure_peer.example.yaml`
 - **Database Mode**: `config_postgres.example.yaml`
 - **Network Demo**: `config_sender.example.yaml`, `config_receiver.example.yaml`
+- **Normalization Examples**: `config_normalization.example.yaml` - Full example with normalization features
+
+#### Data Normalization
+
+CohortBridge now supports automatic data normalization to improve matching accuracy. You can configure normalization methods for different field types in your config file:
+
+```yaml
+# Normalization configuration
+# Format: normalization_method:field_name
+normalization:
+  - name:FIRST        # Standardize name fields (lowercase, remove punctuation, normalize spaces)
+  - name:LAST         # Apply to any name field in your data
+  - date:DATE_OF_BIRTH # Standardize dates to YYYY-MM-DD format
+  - zip:ZIP           # Extract first 5 digits from ZIP codes
+  - gender:GENDER     # Standardize gender to single characters (m/f/nb/o/u)
+```
+
+**Supported Normalization Methods:**
+- **`name`** - Names: Convert to lowercase, remove punctuation, normalize whitespace
+- **`date`** - Dates: Standardize to YYYY-MM-DD format (supports multiple input formats)
+- **`gender`** - Gender: Standardize to single characters (m/f/nb/o/u)
+- **`zip`** - ZIP codes: Extract first 5 digits, remove non-numeric characters
+
+**Field Behavior:**
+- Fields with normalization config use the specified method
+- Fields without `:` or unsupported methods use basic normalization (lowercase, trim)
+- Fields not listed use legacy normalization for backward compatibility
+
+**Example Benefits:**
+- `"Mary-Jane O'Connor"` and `"MARYJANE OCONNOR"` will match after name normalization
+- `"12/25/2023"` and `"2023-12-25"` will match after date normalization  
+- `"12345-6789"` and `"12345 6789"` will match after ZIP normalization
 
 ### Support Files
 
@@ -303,8 +335,8 @@ The business logic is implemented in modular internal packages:
 
 **Enhanced Security (Tokenized)**
 ```bash
-# Step 1: Tokenize data in secure environment
-./cohort-bridge tokenize -input data/patients.csv -output tokens.csv
+# Step 1: Tokenize data in secure environment with normalization
+./cohort-bridge tokenize -input data/patients.csv -output tokens.csv -main-config config_with_normalization.yaml
 
 # Step 2: Match using tokens in less secure environment
 ./cohort-bridge -mode=receiver -config=config_tokenized.yaml
@@ -376,6 +408,17 @@ make test
 
 ### Tuning Parameters
 
+**Data Normalization Settings**
+```yaml
+# Field normalization for improved matching accuracy
+normalization:
+  - name:FIRST        # Apply name normalization to FIRST field
+  - name:LAST         # Apply name normalization to LAST field  
+  - date:BIRTHDATE    # Apply date normalization to BIRTHDATE field
+  - zip:ZIP           # Apply ZIP normalization to ZIP field
+  - gender:GENDER     # Apply gender normalization to GENDER field
+```
+
 **Bloom Filter Settings**
 ```yaml
 bloom:
@@ -438,4 +481,4 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 - **Documentation**: [TBD](URL_TBD)
 - **Issues**: [GitHub Issues](https://github.com/alunalabs/cohort-bridge/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/alunalabs/cohort-bridge/discussions)
-- **Security Issues**: Please report privately to [admin@nerve.run](mailto:admin@nerve.run) 
+- **Security Issues**: Please report privately to [admin@nerve.run](mailto:admin@nerve.run)

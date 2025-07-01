@@ -3,10 +3,13 @@ database:
   filename: "data/patients_b_small2.csv"
   fields: ["first_name", "last_name", "date_of_birth", "address"]
 
+# Normalization configuration
+  # Normalization configuration
+  normalization:
+    - name:first_name      # Apply name normalization to first_name field
+    - name:last_name       # Apply name normalization to last_name field
+    - date:date_of_birth   # Apply date normalization to date_of_birth field
 peer:
-  host: "127.0.0.1"
-  port: 8080
-
 listen_port: 8081
 
 logging:

@@ -13,10 +13,13 @@ database:
     - "email"
     - "date_of_birth"
 
+# Normalization configuration
+  # Normalization configuration
+  normalization:
+    - name:first_name      # Apply name normalization to first_name field
+    - name:last_name       # Apply name normalization to last_name field
+    - date:date_of_birth   # Apply date normalization to date_of_birth field
 peer:
-  host: "localhost"
-  port: 8081
-
 security:
   allowed_ips:
     - "127.0.0.1"

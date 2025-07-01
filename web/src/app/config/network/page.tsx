@@ -8,8 +8,15 @@ export default function NetworkConfigPage() {
         database: {
             type: 'csv',
             filename: 'data/hospital_a_patients.csv',
-            fields: ['FIRST', 'LAST', 'BIRTHDATE', 'ZIP'],
+            fields: ['FIRST', 'LAST', 'BIRTHDATE', 'GENDER', 'ZIP'],
             random_bits_percent: 0.02,
+            normalization: [
+                'name:FIRST',
+                'name:LAST',
+                'date:BIRTHDATE',
+                'gender:GENDER',
+                'zip:ZIP'
+            ],
         },
         peer: {
             host: '10.0.1.100',
@@ -54,7 +61,7 @@ export default function NetworkConfigPage() {
     return (
         <FlexibleConfigBuilder
             title="Network Configuration"
-            description="Multi-party network setup with advanced matching algorithms"
+            description="Multi-party network setup with advanced matching algorithms and data normalization"
             defaultSections={['database', 'peer', 'security', 'timeouts', 'matching', 'logging']}
             defaultValues={defaultValues}
             icon={Network}

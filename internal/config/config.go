@@ -16,8 +16,9 @@ type Config struct {
 		Password          string   `yaml:"password"`
 		DBName            string   `yaml:"dbname"`
 		Table             string   `yaml:"table"`
-		Filename          string   `yaml:"filename"` // Path to data file (raw or tokenized)
-		Fields            []string `yaml:"fields"`   // Only needed when is_tokenized=false
+		Filename          string   `yaml:"filename"`      // Path to data file (raw or tokenized)
+		Fields            []string `yaml:"fields"`        // Only needed when is_tokenized=false
+		Normalization     []string `yaml:"normalization"` // Field normalization specifications like "name:FIRST"
 		RandomBitsPercent float64  `yaml:"random_bits_percent"`
 		IsTokenized       bool     `yaml:"is_tokenized"`        // Whether the data is already tokenized
 		IsEncrypted       bool     `yaml:"is_encrypted"`        // Whether tokenized data is encrypted

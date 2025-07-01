@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
+	"github.com/auroradata-ai/cohort-bridge/internal/crypto"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
@@ -182,10 +183,17 @@ func runTokenizeCommand(args []string) {
 
 	// Try to load field names from main config file
 	var defaultFields []string
+	var normalizationConfig map[string]crypto.NormalizationMethod
 	if mainConfig, err := config.Load(*mainConfigFile); err == nil {
 		if len(mainConfig.Database.Fields) > 0 {
 			defaultFields = mainConfig.Database.Fields
 			fmt.Printf("📋 Using field names from %s: %v\n", *mainConfigFile, defaultFields)
+		}
+
+		// Load normalization configuration
+		if len(mainConfig.Database.Normalization) > 0 {
+			normalizationConfig = crypto.ParseNormalizationConfig(mainConfig.Database.Normalization)
+			fmt.Printf("🔧 Using normalization config: %v\n", mainConfig.Database.Normalization)
 		}
 	}
 
@@ -272,7 +280,7 @@ func runTokenizeCommand(args []string) {
 	// Run tokenization
 	fmt.Println("🚀 Starting tokenization process...")
 
-	if err := performTokenization(*inputFile, *outputFile, *inputFormat, *outputFormat, *batchSize, *minHashSeed, *useDatabase, defaultFields, finalEncryptionKey, keyFile, *noEncryption); err != nil {
+	if err := performTokenization(*inputFile, *outputFile, *inputFormat, *outputFormat, *batchSize, *minHashSeed, *useDatabase, defaultFields, finalEncryptionKey, keyFile, *noEncryption, normalizationConfig); err != nil {
 		fmt.Printf("❌ Tokenization failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -338,7 +346,7 @@ func validateTokenizeInputs(inputFile string, useDatabase bool, configFile strin
 	return nil
 }
 
-func performTokenization(inputFile, outputFile, inputFormat, outputFormat string, batchSize int, minHashSeed string, useDatabase bool, fields []string, encryptionKey, keyFile string, noEncryption bool) error {
+func performTokenization(inputFile, outputFile, inputFormat, outputFormat string, batchSize int, minHashSeed string, useDatabase bool, fields []string, encryptionKey, keyFile string, noEncryption bool, normalizationConfig map[string]crypto.NormalizationMethod) error {
 	if useDatabase {
 		return fmt.Errorf("database mode not yet implemented - please use file mode")
 	}
@@ -370,13 +378,13 @@ func performTokenization(inputFile, outputFile, inputFormat, outputFormat string
 	fmt.Println("💾 Creating output file...")
 
 	if outputFormat == "csv" {
-		return performCSVTokenization(allRecords, outputFile, fields, batchSize, minHashSeed, encryptionKey, keyFile, noEncryption)
+		return performCSVTokenization(allRecords, outputFile, fields, batchSize, minHashSeed, encryptionKey, keyFile, noEncryption, normalizationConfig)
 	} else {
 		return fmt.Errorf("output format %s not yet implemented - please use CSV", outputFormat)
 	}
 }
 
-func performCSVTokenization(allRecords []map[string]string, outputFile string, fields []string, batchSize int, minHashSeed string, encryptionKey, keyFile string, noEncryption bool) error {
+func performCSVTokenization(allRecords []map[string]string, outputFile string, fields []string, batchSize int, minHashSeed string, encryptionKey, keyFile string, noEncryption bool, normalizationConfig map[string]crypto.NormalizationMethod) error {
 	// Determine if we need to encrypt
 	var tempFile string
 	var finalOutputFile string
@@ -439,7 +447,23 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 			var fieldValues []string
 			for _, field := range fields {
 				if value, exists := record[field]; exists && value != "" {
-					fieldValues = append(fieldValues, value)
+					// Apply normalization if configured
+					var normalizedValue string
+					if normalizationConfig != nil {
+						if method, hasNorm := normalizationConfig[field]; hasNorm {
+							normalizedValue = crypto.NormalizeField(value, method)
+						} else {
+							// No specific normalization configured, apply basic normalization
+							normalizedValue = crypto.NormalizeField(value, "")
+						}
+					} else {
+						// Basic normalization fallback
+						normalizedValue = crypto.NormalizeField(value, "")
+					}
+
+					if normalizedValue != "" {
+						fieldValues = append(fieldValues, normalizedValue)
+					}
 				}
 			}
 

@@ -11,11 +11,14 @@ database:
     - ZIP        # Matches existing column name
   random_bits_percent: 0.0  # Percentage of random bits to add to Bloom filters (0.0-1.0)
 
+# Normalization configuration
+  # Normalization configuration
+  normalization:
+    - name:FIRST      # Apply name normalization to FIRST field
+    - name:LAST       # Apply name normalization to LAST field
+    - date:BIRTHDATE  # Apply date normalization to BIRTHDATE field
+    - zip:ZIP         # Apply ZIP normalization to ZIP field
 peer:
-  host: 127.0.0.1  # IP address of the peer (receiver for sender, sender for receiver)
-  port: 8081       # Port of the peer
-
-# Security configuration for network access control
 security:
   allowed_ips:           # Whitelist of allowed IP addresses
     - "127.0.0.1"        # localhost IPv4

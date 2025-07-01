@@ -8,8 +8,15 @@ export default function SecureConfigPage() {
         database: {
             type: 'csv',
             filename: 'data/patients_secure.csv',
-            fields: ['FIRST', 'LAST', 'BIRTHDATE', 'ZIP'],
+            fields: ['FIRST', 'LAST', 'BIRTHDATE', 'GENDER', 'ZIP'],
             random_bits_percent: 0.05,
+            normalization: [
+                'name:FIRST',
+                'name:LAST',
+                'date:BIRTHDATE',
+                'gender:GENDER',
+                'zip:ZIP'
+            ],
         },
         peer: {
             host: '192.168.1.100',
@@ -45,7 +52,7 @@ export default function SecureConfigPage() {
     return (
         <FlexibleConfigBuilder
             title="Secure Configuration"
-            description="Maximum security with comprehensive logging and audit trails"
+            description="Maximum security with comprehensive logging, audit trails, and data normalization"
             defaultSections={['database', 'peer', 'security', 'timeouts', 'logging']}
             defaultValues={defaultValues}
             icon={Shield}

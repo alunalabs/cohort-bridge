@@ -9,6 +9,15 @@ database:
     - last_name     # Patient last name column  
     - dob          # Date of birth column (YYYY-MM-DD format)
     - zip          # ZIP code column
+  # Normalization configuration (optional)
+  # Format: normalization_method:field_name
+  # Supported methods: name, date, gender, zip
+  # Uncomment and customize as needed:
+  # normalization:
+  #   - name:first_name  # Apply name normalization (lowercase, remove punctuation, normalize spaces)
+  #   - name:last_name   # Apply name normalization
+  #   - date:dob         # Apply date normalization (standardize to YYYY-MM-DD)
+  #   - zip:zip          # Apply ZIP normalization (extract first 5 digits)
 
 # Network configuration for peer-to-peer matching
 peer:

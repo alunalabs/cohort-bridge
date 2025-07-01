@@ -13,8 +13,15 @@ export default function PostgresConfigPage() {
             password: '',
             dbname: 'cohort_database',
             table: 'users',
-            fields: ['id', 'first_name', 'last_name', 'email', 'date_of_birth'],
+            fields: ['id', 'first_name', 'last_name', 'date_of_birth', 'gender', 'zip_code', 'email'],
             random_bits_percent: 0.0,
+            normalization: [
+                'name:first_name',
+                'name:last_name',
+                'date:date_of_birth',
+                'gender:gender',
+                'zip:zip_code'
+            ],
         },
         peer: {
             host: 'localhost',
@@ -40,7 +47,7 @@ export default function PostgresConfigPage() {
     return (
         <FlexibleConfigBuilder
             title="PostgreSQL Configuration"
-            description="Connect to PostgreSQL databases with enhanced security"
+            description="Connect to PostgreSQL databases with enhanced security and data normalization"
             defaultSections={['database', 'peer', 'security', 'timeouts']}
             defaultValues={defaultValues}
             icon={Database}
