@@ -500,12 +500,11 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 	fmt.Printf("  🎯 Using Hamming threshold: %d\n", matchThreshold)
 	fmt.Printf("  📈 Using Jaccard threshold: %.3f\n", jaccardThreshold)
 
-	// Configure matching pipeline
+	// Configure zero-knowledge matching pipeline
+	// All thresholds are now hardcoded for security - no configurable values
 	pipelineConfig := &match.PipelineConfig{
 		FuzzyMatchConfig: &match.FuzzyMatchConfig{
-			HammingThreshold:  uint32(matchThreshold),
-			JaccardThreshold:  jaccardThreshold,
-			UseSecureProtocol: false,
+			Party: 0, // Default to party 0 for validation
 		},
 		OutputPath:    outputFile + ".matches", // Temporary file for matches
 		EnableStats:   true,
@@ -696,11 +695,11 @@ func loadGroundTruth(path string) (map[string]string, error) {
 	return groundTruth, nil
 }
 
-// loadDataset loads a dataset from configuration
-func loadDataset(cfg *config.Config, datasetName string) ([]server.PatientRecord, error) {
+// loadDataset loads a dataset from configuration for zero-knowledge validation
+func loadDataset(cfg *config.Config, datasetName string) ([]*pprl.Record, error) {
 	fmt.Printf("   📊 Loading %s...\n", datasetName)
 
-	var records []server.PatientRecord
+	var records []*pprl.Record
 	var err error
 
 	if cfg.Database.IsTokenized {
@@ -724,129 +723,89 @@ func loadDataset(cfg *config.Config, datasetName string) ([]server.PatientRecord
 	return records, nil
 }
 
-// runMatchingPipeline runs the PPRL matching pipeline using both Hamming and Jaccard thresholds
-func runMatchingPipeline(records1, records2 []server.PatientRecord, pipeline *match.Pipeline, hammingThreshold uint32, jaccardThreshold float64) ([]*match.MatchResult, []*match.MatchResult, error) {
-	fmt.Println("   🔄 Computing pairwise comparisons...")
+// REMOVED: runMatchingPipeline
+// For validation purposes, we now use the zero-knowledge fuzzy matcher directly
+// This ensures validation uses the same secure protocols as production
+func runMatchingPipeline(records1, records2 []*pprl.Record, pipeline *match.Pipeline, hammingThreshold uint32, jaccardThreshold float64) ([]*match.PrivateMatchResult, []*match.PrivateMatchResult, error) {
+	fmt.Println("   🔄 Computing zero-knowledge matching for validation...")
+	fmt.Println("   ⚠️  Note: Using hardcoded security thresholds (no configurable parameters)")
 
-	var allComparisons []*match.MatchResult
-	var matches []*match.MatchResult
+	// Use the zero-knowledge fuzzy matcher for validation
+	fuzzyMatcher := match.NewFuzzyMatcher(&match.FuzzyMatchConfig{
+		Party: 0, // Validation uses party 0
+	})
 
+	var matches []*match.PrivateMatchResult
 	totalComparisons := 0
-	fmt.Printf("   🔧 Using Hamming threshold: %d (distances ≤ %d will be considered)\n", hammingThreshold, hammingThreshold)
-	fmt.Printf("   📈 Using Jaccard threshold: %.3f (similarities ≥ %.3f will be considered)\n", jaccardThreshold, jaccardThreshold)
 
-	// Perform all pairwise comparisons
+	// Perform zero-knowledge comparisons
 	for _, record1 := range records1 {
 		for _, record2 := range records2 {
 			totalComparisons++
 
-			// Calculate Hamming distance
-			hammingDist, err := record1.BloomFilter.HammingDistance(record2.BloomFilter)
+			// Use zero-knowledge comparison
+			result, err := fuzzyMatcher.CompareRecords(record1, record2)
 			if err != nil {
-				continue // Skip this comparison on error
+				continue // Skip on error - no information leaked
 			}
 
-			// Calculate match score using PROVEN working method from test command
-			bfSize := record1.BloomFilter.GetSize()
-			matchScore := 1.0
-			if hammingDist > 0 {
-				matchScore = 1.0 - (float64(hammingDist) / float64(bfSize))
+			// Only add if it's a match (result will be nil for non-matches)
+			if result != nil {
+				matches = append(matches, result)
 			}
 
-			// Calculate Jaccard similarity using pre-computed signatures if available
-			var jaccardSim float64
-			if len(record1.MinHashSignature) > 0 && len(record2.MinHashSignature) > 0 {
-				jaccardSim, _ = pprl.JaccardSimilarity(record1.MinHashSignature, record2.MinHashSignature)
-			} else if record1.MinHash != nil && record2.MinHash != nil {
-				sig1, err1 := record1.MinHash.ComputeSignature(record1.BloomFilter)
-				sig2, err2 := record2.MinHash.ComputeSignature(record2.BloomFilter)
-				if err1 == nil && err2 == nil {
-					jaccardSim, _ = pprl.JaccardSimilarity(sig1, sig2)
-				}
-			}
-
-			// Determine if this is a match using BOTH thresholds (same as FuzzyMatcher)
-			isMatch := hammingDist <= hammingThreshold && jaccardSim >= jaccardThreshold
-
-			// Create match result
-			matchResult := &match.MatchResult{
-				ID1:               record1.ID,
-				ID2:               record2.ID,
-				HammingDistance:   hammingDist,
-				JaccardSimilarity: jaccardSim,
-				MatchScore:        matchScore, // Use normalized 0-1 score
-				IsMatch:           isMatch,
-			}
-
-			allComparisons = append(allComparisons, matchResult)
-
-			// Add to matches if it meets threshold
-			if matchResult.IsMatch {
-				matches = append(matches, matchResult)
-			}
-
-			// Debug first few comparisons
+			// Debug first few comparisons (limited information only)
 			if totalComparisons <= 3 {
-				fmt.Printf("   🔍 DEBUG: Comparison #%d: %s->%s, Hamming=%d, Score=%.6f, IsMatch=%v\n",
-					totalComparisons, record1.ID, record2.ID, hammingDist, matchScore, isMatch)
+				isMatch := result != nil
+				fmt.Printf("   🔍 DEBUG: Comparison #%d: %s->%s, IsMatch=%v\n",
+					totalComparisons, record1.ID, record2.ID, isMatch)
 			}
 		}
 	}
 
-	fmt.Printf("   ✅ Completed %d comparisons, found %d matches (Hamming ≤ %d AND Jaccard ≥ %.3f)\n", len(allComparisons), len(matches), hammingThreshold, jaccardThreshold)
+	fmt.Printf("   ✅ Completed %d zero-knowledge comparisons, found %d matches\n", totalComparisons, len(matches))
 
-	// Debug sample of matches found
+	// Debug sample of matches found (IDs only)
 	if len(matches) > 0 {
 		fmt.Printf("   🔍 Sample matches found:\n")
 		for i, match := range matches {
 			if i >= 3 { // Show first 3
 				break
 			}
-			fmt.Printf("     %s->%s: Hamming=%d, Score=%.6f\n", match.ID1, match.ID2, match.HammingDistance, match.MatchScore)
+			fmt.Printf("     %s->%s\n", match.LocalID, match.PeerID)
 		}
 	}
 
-	return matches, allComparisons, nil
+	// Return both matches and all matches (for validation, allComparisons = matches)
+	return matches, matches, nil
 }
 
-// validateResults validates predicted matches against ground truth
-func validateResults(matches []*match.MatchResult, allComparisons []*match.MatchResult, groundTruth map[string]string) *ValidationResult {
+// validateResults validates zero-knowledge predicted matches against ground truth
+func validateResults(matches []*match.PrivateMatchResult, allComparisons []*match.PrivateMatchResult, groundTruth map[string]string) *ValidationResult {
 	result := &ValidationResult{
 		MatchedPairs:      make([]MatchPair, 0),
 		MissedMatches:     make([]string, 0),
 		FalseMatches:      make([]MatchPair, 0),
-		LowestTrueScore:   1000.0,
-		HighestFalseScore: 0.0,
+		LowestTrueScore:   1000.0, // Not used in zero-knowledge validation
+		HighestFalseScore: 0.0,    // Not used in zero-knowledge validation
 	}
 
-	// Create a set of predicted matches
+	// Create a set of predicted matches using ONLY IDs
 	predictedMatches := make(map[string]string)
 	for _, match := range matches {
-		if match.IsMatch {
-			predictedMatches[match.ID1] = match.ID2
-		}
+		predictedMatches[match.LocalID] = match.PeerID
 	}
 
 	// Calculate True Positives and False Negatives
 	for id1, expectedID2 := range groundTruth {
 		if predictedID2, found := predictedMatches[id1]; found && predictedID2 == expectedID2 {
 			result.TruePositives++
-			score := 0.0
-			// Look for the actual comparison score in allComparisons
-			for _, comparison := range allComparisons {
-				if comparison.ID1 == id1 && comparison.ID2 == expectedID2 {
-					score = comparison.MatchScore
-					break
-				}
-			}
+			// In zero-knowledge validation, we don't have scores - use 1.0 for matches
 			result.MatchedPairs = append(result.MatchedPairs, MatchPair{
 				ID1:   id1,
 				ID2:   predictedID2,
-				Score: score,
+				Score: 1.0, // Placeholder score - actual scores not available in zero-knowledge
 			})
-			if score < result.LowestTrueScore {
-				result.LowestTrueScore = score
-			}
 		} else {
 			result.FalseNegatives++
 			result.MissedMatches = append(result.MissedMatches, fmt.Sprintf("%s -> %s", id1, expectedID2))
@@ -855,22 +814,17 @@ func validateResults(matches []*match.MatchResult, allComparisons []*match.Match
 
 	// Calculate False Positives
 	for _, match := range matches {
-		if match.IsMatch {
-			if expectedID2, exists := groundTruth[match.ID1]; !exists || expectedID2 != match.ID2 {
-				result.FalsePositives++
-				result.FalseMatches = append(result.FalseMatches, MatchPair{
-					ID1:   match.ID1,
-					ID2:   match.ID2,
-					Score: match.MatchScore,
-				})
-				if match.MatchScore > result.HighestFalseScore {
-					result.HighestFalseScore = match.MatchScore
-				}
-			}
+		if expectedID2, exists := groundTruth[match.LocalID]; !exists || expectedID2 != match.PeerID {
+			result.FalsePositives++
+			result.FalseMatches = append(result.FalseMatches, MatchPair{
+				ID1:   match.LocalID,
+				ID2:   match.PeerID,
+				Score: 1.0, // Placeholder score - actual scores not available in zero-knowledge
+			})
 		}
 	}
 
-	// Calculate metrics
+	// Calculate metrics (same as before)
 	if result.TruePositives+result.FalsePositives > 0 {
 		result.Precision = float64(result.TruePositives) / float64(result.TruePositives+result.FalsePositives)
 	}

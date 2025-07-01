@@ -379,7 +379,7 @@ func (th *TestHarness) RunTest(pipelineConfig *PipelineConfig) (*TestResults, er
 	}
 
 	// Evaluate results against ground truth
-	evaluation := th.EvaluateResults(matchResult.Matches)
+	evaluation := th.EvaluateResults(matchResult.PrivateMatches)
 
 	return &TestResults{
 		MatchResult:      matchResult,
@@ -391,17 +391,17 @@ func (th *TestHarness) RunTest(pipelineConfig *PipelineConfig) (*TestResults, er
 }
 
 // EvaluateResults compares match results against ground truth
-func (th *TestHarness) EvaluateResults(matches []*MatchResult) *Evaluation {
+func (th *TestHarness) EvaluateResults(matches []*PrivateMatchResult) *Evaluation {
 	var truePositives, falsePositives, falseNegatives int
 
 	foundMatches := make(map[string]bool)
 
 	// Check each found match against ground truth
 	for _, match := range matches {
-		key1 := match.ID1 + "->" + match.ID2
-		key2 := match.ID2 + "->" + match.ID1
+		key1 := match.LocalID + "->" + match.PeerID
+		key2 := match.PeerID + "->" + match.LocalID
 
-		if th.isGroundTruthMatch(match.ID1, match.ID2) {
+		if th.isGroundTruthMatch(match.LocalID, match.PeerID) {
 			truePositives++
 			foundMatches[key1] = true
 			foundMatches[key2] = true

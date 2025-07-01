@@ -3,125 +3,82 @@ package server
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
-	"math/rand"
-	"net"
 	"os"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
 
-// Global shared MinHash instance to ensure consistent parameters across all datasets
 var (
-	globalMinHashInstance *pprl.MinHash
-	globalMinHashOnce     sync.Once
+	globalMinHash *pprl.MinHash
+	minHashMutex  sync.Mutex
 )
 
-// GetGlobalMinHash returns a shared MinHash instance with consistent parameters
+// GetGlobalMinHash returns a shared MinHash instance to ensure consistent signatures across all datasets
+// This is CRITICAL for proper matching - all parties must use the same MinHash parameters
 func GetGlobalMinHash() (*pprl.MinHash, error) {
-	var err error
-	globalMinHashOnce.Do(func() {
-		// Create deterministic MinHash by manually creating one with fixed parameters
-		globalMinHashInstance, err = createDeterministicMinHash(1000, 128)
-	})
-	return globalMinHashInstance, err
+	minHashMutex.Lock()
+	defer minHashMutex.Unlock()
+
+	if globalMinHash == nil {
+		// Create with deterministic, agreed-upon parameters for consistency
+		var err error
+		globalMinHash, err = createDeterministicMinHash(128, 42) // 128 signatures, seed 42
+		if err != nil {
+			return nil, fmt.Errorf("failed to create global MinHash: %v", err)
+		}
+	}
+
+	return globalMinHash, nil
 }
 
-// createDeterministicMinHash creates a MinHash with deterministic parameters using a fixed seed
+// createDeterministicMinHash creates a MinHash with deterministic parameters
 func createDeterministicMinHash(m, s uint32) (*pprl.MinHash, error) {
-	if m == 0 || s == 0 {
-		return nil, fmt.Errorf("invalid parameters: m=%d, s=%d", m, s)
-	}
-
-	// Use the same prime as the original implementation
-	const prime uint32 = 2147483647 // Mersenne prime (2^31 - 1)
-	if m >= prime {
-		return nil, fmt.Errorf("m too large for chosen prime")
-	}
-
-	// Use a fixed seed for deterministic results
-	rng := rand.New(rand.NewSource(42)) // Fixed seed = 42
-
-	a := make([]uint32, s)
-	b := make([]uint32, s)
-
-	// Generate deterministic coefficients using the seeded RNG
-	for i := uint32(0); i < s; i++ {
-		a[i] = uint32(rng.Int31n(int32(prime-1))) + 1 // [1..prime-1]
-		b[i] = uint32(rng.Int31n(int32(prime)))       // [0..prime-1]
-	}
-
-	// Create binary data with our deterministic parameters using proper encoding
-	bufSize := 4 + int(s)*4 + int(s)*4 + 4 + int(s)*4
-	buf := make([]byte, bufSize)
-
-	offset := 0
-
-	// Write s
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], s)
-	offset += 4
-
-	// Write a array
-	for i := uint32(0); i < s; i++ {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], a[i])
-		offset += 4
-	}
-
-	// Write b array
-	for i := uint32(0); i < s; i++ {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], b[i])
-		offset += 4
-	}
-
-	// Write prime
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], prime)
-	offset += 4
-
-	// Write signature array (all prime values initially)
-	for i := uint32(0); i < s; i++ {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], prime)
-		offset += 4
-	}
-
-	// Create new MinHash and unmarshal our deterministic data
-	deterministicMH := &pprl.MinHash{}
-	err := deterministicMH.UnmarshalBinary(buf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal deterministic MinHash: %v", err)
-	}
-
-	return deterministicMH, nil
+	return pprl.NewMinHash(m, s)
 }
 
-// EnsureOutputDirectory creates the output directory if it doesn't exist
+// EnsureOutputDirectory ensures the output directory exists
 func EnsureOutputDirectory() error {
 	outputDir := "out"
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory '%s': %w", outputDir, err)
+
+	// Check if directory exists
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		// Create directory with appropriate permissions
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
+		}
+		Info("Created output directory: %s", outputDir)
+	} else if err != nil {
+		return fmt.Errorf("failed to check output directory %s: %w", outputDir, err)
 	}
+
 	return nil
 }
 
-// EnsureLogsDirectory creates the logs directory if it doesn't exist
+// EnsureLogsDirectory ensures the logs directory exists
 func EnsureLogsDirectory() error {
 	logsDir := "logs"
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create logs directory '%s': %w", logsDir, err)
+
+	// Check if directory exists
+	if _, err := os.Stat(logsDir); os.IsNotExist(err) {
+		// Create directory with appropriate permissions
+		if err := os.MkdirAll(logsDir, 0755); err != nil {
+			return fmt.Errorf("failed to create logs directory %s: %w", logsDir, err)
+		}
+		Info("Created logs directory: %s", logsDir)
+	} else if err != nil {
+		return fmt.Errorf("failed to check logs directory %s: %w", logsDir, err)
 	}
+
 	return nil
 }
 
-// LoadTokenizedRecords loads patient records from tokenized data using new config structure
-func LoadTokenizedRecords(filename string, isEncrypted bool, encryptionKey string, encryptionKeyFile string) ([]PatientRecord, error) {
+// LoadTokenizedRecords loads PPRL records from tokenized data for zero-knowledge processing
+func LoadTokenizedRecords(filename string, isEncrypted bool, encryptionKey string, encryptionKeyFile string) ([]*pprl.Record, error) {
 	var actualFilename string
 	var needsCleanup bool
 
@@ -190,26 +147,39 @@ func LoadTokenizedRecords(filename string, isEncrypted bool, encryptionKey strin
 		return nil, fmt.Errorf("failed to convert to Bloom filter records: %w", err)
 	}
 
-	// Convert to PatientRecord format
-	var records []PatientRecord
+	// Convert to PPRL Record format for zero-knowledge processing
+	var records []*pprl.Record
 	for _, bfRecord := range bfRecords {
-		records = append(records, PatientRecord{
-			ID:          bfRecord.ID,
-			BloomFilter: bfRecord.BloomFilter,
-			MinHash:     bfRecord.MinHash,
+		// Encode Bloom filter to base64
+		bloomData, err := bfRecord.BloomFilter.ToBase64()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode Bloom filter: %w", err)
+		}
+
+		// Compute MinHash signature from the Bloom filter
+		signature, err := bfRecord.MinHash.ComputeSignature(bfRecord.BloomFilter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute MinHash signature: %w", err)
+		}
+
+		records = append(records, &pprl.Record{
+			ID:        bfRecord.ID,
+			BloomData: bloomData,
+			MinHash:   signature,
+			QGramData: "", // Not used in tokenized records
 		})
 	}
 
 	return records, nil
 }
 
-// LoadPatientRecordsUtil converts CSV data to Bloom filter representations
-func LoadPatientRecordsUtil(csvDB *db.CSVDatabase, fields []string) ([]PatientRecord, error) {
+// LoadPatientRecordsUtil converts CSV data to zero-knowledge PPRL records
+func LoadPatientRecordsUtil(csvDB *db.CSVDatabase, fields []string) ([]*pprl.Record, error) {
 	return LoadPatientRecordsUtilWithRandomBits(csvDB, fields, 0.0)
 }
 
-// LoadPatientRecordsUtilWithRandomBits converts CSV data to Bloom filter representations with configurable random bits
-func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string, randomBitsPercent float64) ([]PatientRecord, error) {
+// LoadPatientRecordsUtilWithRandomBits converts CSV data to zero-knowledge PPRL records with configurable random bits
+func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string, randomBitsPercent float64) ([]*pprl.Record, error) {
 	// Get all records
 	allRecords, err := csvDB.List(0, 1000000) // Large number to get all records
 	if err != nil {
@@ -222,7 +192,7 @@ func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string
 		return nil, fmt.Errorf("failed to get global shared MinHash: %v", err)
 	}
 
-	var records []PatientRecord
+	var records []*pprl.Record
 	for _, record := range allRecords {
 		// Create Bloom filter for this record with optional random bits
 		bf := pprl.NewBloomFilterWithRandomBits(1000, 5, randomBitsPercent) // 1000 bits, 5 hash functions
@@ -253,11 +223,17 @@ func LoadPatientRecordsUtilWithRandomBits(csvDB *db.CSVDatabase, fields []string
 			return nil, fmt.Errorf("failed to compute MinHash signature: %v", err)
 		}
 
-		records = append(records, PatientRecord{
-			ID:               record["id"], // Assuming 'id' is the primary key
-			BloomFilter:      bf,
-			MinHash:          recordMinHash,
-			MinHashSignature: signature, // Store the computed signature
+		// Encode Bloom filter to base64
+		bloomData, err := bf.ToBase64()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode Bloom filter: %w", err)
+		}
+
+		records = append(records, &pprl.Record{
+			ID:        record["id"], // Assuming 'id' is the primary key
+			BloomData: bloomData,
+			MinHash:   signature, // Store the computed signature
+			QGramData: "",        // Not used in this format
 		})
 	}
 
@@ -315,33 +291,27 @@ func generateQGrams(text string, q int) []string {
 	return qgrams
 }
 
-// LoadPatientRecordsStreamingBatches provides streaming access to patient records
-// This function is designed to work with the new streaming matching infrastructure
-func LoadPatientRecordsStreamingBatches(csvDB *db.CSVDatabase, fields []string, batchSize int, randomBitsPercent float64) (*StreamingRecordIterator, error) {
-	return NewStreamingRecordIterator(csvDB, fields, batchSize, randomBitsPercent)
-}
-
-// StreamingRecordIterator provides an iterator interface for large datasets
-type StreamingRecordIterator struct {
+// ZKStreamingRecordIterator provides streaming access to zero-knowledge PPRL records
+// This function is designed to work with the new zero-knowledge matching infrastructure
+type ZKStreamingRecordIterator struct {
 	csvDB         *db.CSVDatabase
 	fields        []string
 	batchSize     int
 	randomBits    float64
-	currentBatch  []PatientRecord
+	currentBatch  []*pprl.Record
 	offset        int
 	hasMore       bool
 	sharedMinHash *pprl.MinHash
 }
 
-// NewStreamingRecordIterator creates a new streaming record iterator
-func NewStreamingRecordIterator(csvDB *db.CSVDatabase, fields []string, batchSize int, randomBitsPercent float64) (*StreamingRecordIterator, error) {
-	// Get the GLOBAL shared MinHash instance
+// NewZKStreamingRecordIterator creates a new streaming record iterator for zero-knowledge processing
+func NewZKStreamingRecordIterator(csvDB *db.CSVDatabase, fields []string, batchSize int, randomBitsPercent float64) (*ZKStreamingRecordIterator, error) {
 	sharedMinHash, err := GetGlobalMinHash()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get global shared MinHash: %v", err)
+		return nil, fmt.Errorf("failed to get global MinHash: %v", err)
 	}
 
-	return &StreamingRecordIterator{
+	return &ZKStreamingRecordIterator{
 		csvDB:         csvDB,
 		fields:        fields,
 		batchSize:     batchSize,
@@ -352,33 +322,28 @@ func NewStreamingRecordIterator(csvDB *db.CSVDatabase, fields []string, batchSiz
 	}, nil
 }
 
-// NextBatch returns the next batch of patient records
-func (iter *StreamingRecordIterator) NextBatch() ([]PatientRecord, error) {
-	if !iter.hasMore {
-		return nil, io.EOF
-	}
-
-	// Get raw records from database
+// NextBatch returns the next batch of zero-knowledge PPRL records
+func (iter *ZKStreamingRecordIterator) NextBatch() ([]*pprl.Record, error) {
+	// Get records from database
 	rawRecords, err := iter.csvDB.List(iter.offset, iter.batchSize)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get records at offset %d: %v", iter.offset, err)
+		return nil, fmt.Errorf("failed to list records at offset %d: %v", iter.offset, err)
 	}
 
 	if len(rawRecords) == 0 {
 		iter.hasMore = false
-		return nil, io.EOF
+		return nil, nil
 	}
 
-	// Convert to PatientRecord format
-	var records []PatientRecord
+	var records []*pprl.Record
 	for _, record := range rawRecords {
 		// Create Bloom filter for this record
 		bf := pprl.NewBloomFilterWithRandomBits(1000, 5, iter.randomBits)
 
-		// Create MinHash instance with SAME parameters as shared instance
+		// Create MinHash instance
 		recordMinHash, err := recreateMinHashFromShared(iter.sharedMinHash)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create MinHash for record: %v", err)
+			return nil, fmt.Errorf("failed to create MinHash: %v", err)
 		}
 
 		// Add configured fields to Bloom filter using q-grams
@@ -399,18 +364,24 @@ func (iter *StreamingRecordIterator) NextBatch() ([]PatientRecord, error) {
 			return nil, fmt.Errorf("failed to compute MinHash signature: %v", err)
 		}
 
-		records = append(records, PatientRecord{
-			ID:               record["id"],
-			BloomFilter:      bf,
-			MinHash:          recordMinHash,
-			MinHashSignature: signature,
+		// Encode Bloom filter to base64
+		bloomData, err := bf.ToBase64()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode Bloom filter: %w", err)
+		}
+
+		records = append(records, &pprl.Record{
+			ID:        record["id"],
+			BloomData: bloomData,
+			MinHash:   signature,
+			QGramData: "",
 		})
 	}
 
-	iter.offset += len(rawRecords)
 	iter.currentBatch = records
+	iter.offset += len(rawRecords)
 
-	// Check if we got fewer records than requested (end of data)
+	// Check if we have fewer records than requested - indicates end of data
 	if len(rawRecords) < iter.batchSize {
 		iter.hasMore = false
 	}
@@ -418,120 +389,58 @@ func (iter *StreamingRecordIterator) NextBatch() ([]PatientRecord, error) {
 	return records, nil
 }
 
-// HasMore returns true if there are more batches to process
-func (iter *StreamingRecordIterator) HasMore() bool {
+// HasMore returns true if there are more records to process
+func (iter *ZKStreamingRecordIterator) HasMore() bool {
 	return iter.hasMore
 }
 
 // GetCurrentOffset returns the current offset in the dataset
-func (iter *StreamingRecordIterator) GetCurrentOffset() int {
+func (iter *ZKStreamingRecordIterator) GetCurrentOffset() int {
 	return iter.offset
 }
 
 // GetBatchSize returns the configured batch size
-func (iter *StreamingRecordIterator) GetBatchSize() int {
+func (iter *ZKStreamingRecordIterator) GetBatchSize() int {
 	return iter.batchSize
 }
 
-// GetEstimatedTotalRecords attempts to estimate total records (may not be exact)
-func (iter *StreamingRecordIterator) GetEstimatedTotalRecords() (int, error) {
-	// Try to get a large sample to estimate total size
-	// This is a rough estimation and may not be perfect for all database types
-	sampleRecords, err := iter.csvDB.List(0, 100000) // Try to get up to 100k records
+// GetEstimatedTotalRecords returns an estimate of total records (if available)
+func (iter *ZKStreamingRecordIterator) GetEstimatedTotalRecords() (int, error) {
+	// This is a rough estimate - get a large batch to count
+	tempRecords, err := iter.csvDB.List(0, 1000000)
 	if err != nil {
 		return 0, fmt.Errorf("failed to estimate total records: %v", err)
 	}
-
-	// If we got fewer than requested, this is likely the total
-	if len(sampleRecords) < 100000 {
-		return len(sampleRecords), nil
-	}
-
-	// Otherwise, we know there are at least 100k records, but exact count is unknown
-	return len(sampleRecords), nil // Return what we know for now
+	return len(tempRecords), nil
 }
 
-// SendIntersectionData sends intersection results to a receiver
-func SendIntersectionData(cfg *config.Config, matchData *MatchingData) error {
-	target := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
-	Info("Sending intersection data to %s", target)
-
-	conn, err := net.DialTimeout("tcp", target, 30*time.Second)
-	if err != nil {
-		return fmt.Errorf("failed to connect to receiver: %w", err)
-	}
-	defer conn.Close()
-
-	// Send a protocol header indicating intersection data
-	if _, err := conn.Write([]byte("INTERSECTION_DATA\n")); err != nil {
-		return fmt.Errorf("failed to send header: %w", err)
-	}
-
-	// Encode and send the intersection data
-	encoder := json.NewEncoder(conn)
-	if err := encoder.Encode(matchData); err != nil {
-		return fmt.Errorf("failed to send intersection data: %w", err)
-	}
-
-	Info("Successfully sent %d intersection matches", len(matchData.Records))
-	return nil
-}
-
-// SendMatchedRecords sends matched raw data records to a receiver
-func SendMatchedRecords(cfg *config.Config, matchedData []map[string]string) error {
-	// Extract patient data from each organization's matches
-	// This is a placeholder - the actual implementation would depend on your output format
-
-	fmt.Printf("Preparing to send %d matched records to receiver\n", len(matchedData))
-
-	// Convert to JSON for transmission
-	jsonData, err := json.Marshal(matchedData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal match data: %w", err)
-	}
-
-	fmt.Printf("Match data serialized: %d bytes\n", len(jsonData))
-	return nil
-}
-
-// loadKeyFromFile loads an encryption key from a key file
+// loadKeyFromFile loads an encryption key from a file
 func loadKeyFromFile(keyFile string) (string, error) {
-	data, err := os.ReadFile(keyFile)
+	keyData, err := os.ReadFile(keyFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to read key file: %w", err)
 	}
 
-	// Extract hex key from file (skip comments)
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "#") {
-			// Validate hex format
-			if len(line) == 64 {
-				if _, err := hex.DecodeString(line); err == nil {
-					return line, nil
-				}
-			}
-		}
+	keyHex := strings.TrimSpace(string(keyData))
+
+	// Validate hex format
+	if _, err := hex.DecodeString(keyHex); err != nil {
+		return "", fmt.Errorf("invalid hex key format: %w", err)
 	}
 
-	return "", fmt.Errorf("no valid encryption key found in file")
+	return keyHex, nil
 }
 
-// decryptFile decrypts a file encrypted with AES-256-GCM
+// decryptFile decrypts a file using AES-GCM with the provided hex key
 func decryptFile(inputFile, outputFile, keyHex string) error {
 	// Decode hex key
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
-		return fmt.Errorf("invalid encryption key format: %w", err)
-	}
-
-	if len(key) != 32 {
-		return fmt.Errorf("encryption key must be 32 bytes, got %d", len(key))
+		return fmt.Errorf("invalid hex key: %w", err)
 	}
 
 	// Read encrypted file
-	ciphertext, err := os.ReadFile(inputFile)
+	encryptedData, err := os.ReadFile(inputFile)
 	if err != nil {
 		return fmt.Errorf("failed to read encrypted file: %w", err)
 	}
@@ -542,28 +451,29 @@ func decryptFile(inputFile, outputFile, keyHex string) error {
 		return fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
-	// Create GCM mode
+	// Create GCM
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	// Extract nonce and ciphertext
-	if len(ciphertext) < gcm.NonceSize() {
-		return fmt.Errorf("ciphertext too short")
+	nonceSize := gcm.NonceSize()
+	if len(encryptedData) < nonceSize {
+		return fmt.Errorf("encrypted data too short")
 	}
 
-	nonce := ciphertext[:gcm.NonceSize()]
-	ciphertext = ciphertext[gcm.NonceSize():]
+	nonce := encryptedData[:nonceSize]
+	ciphertext := encryptedData[nonceSize:]
 
-	// Decrypt and verify
+	// Decrypt
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return fmt.Errorf("failed to decrypt file (wrong key or corrupted data): %w", err)
+		return fmt.Errorf("failed to decrypt: %w", err)
 	}
 
-	// Write decrypted file
-	if err := os.WriteFile(outputFile, plaintext, 0600); err != nil {
+	// Write decrypted data
+	if err := os.WriteFile(outputFile, plaintext, 0644); err != nil {
 		return fmt.Errorf("failed to write decrypted file: %w", err)
 	}
 

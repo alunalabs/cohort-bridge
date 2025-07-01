@@ -13,25 +13,26 @@ import (
 	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
 )
 
-// StreamingConfig defines configuration for streaming operations
+// StreamingConfig defines zero-knowledge streaming configuration
+// All similarity thresholds are hardcoded for security
 type StreamingConfig struct {
-	BatchSize         int     // Number of records to process in each batch
-	MaxMemoryMB       int     // Maximum memory to use (in MB)
-	EnableProgressLog bool    // Whether to log progress
-	WriteBufferSize   int     // Buffer size for writing results
-	HammingThreshold  uint32  // Hamming distance threshold for matches
-	JaccardThreshold  float64 // Jaccard similarity threshold
+	BatchSize         int  // Number of records to process in each batch
+	MaxMemoryMB       int  // Maximum memory to use (in MB)
+	EnableProgressLog bool // Whether to log progress
+	WriteBufferSize   int  // Buffer size for writing results
+	Party             int  // Party number for zero-knowledge protocol (0 or 1)
+	// NO configurable thresholds - all hardcoded for security
 }
 
-// RecordBatch represents a batch of records for processing
+// RecordBatch represents a batch of PPRL records for zero-knowledge processing
 type RecordBatch struct {
-	Records []PatientRecord
+	Records []*pprl.Record
 	Offset  int
 	Size    int
 }
 
-// MatchResultWriter handles streaming output of match results
-type MatchResultWriter struct {
+// ZKMatchResultWriter handles streaming output of ONLY matches (zero information leakage)
+type ZKMatchResultWriter struct {
 	file       *os.File
 	writer     *csv.Writer
 	jsonFile   *os.File
@@ -40,7 +41,7 @@ type MatchResultWriter struct {
 	count      int
 }
 
-// StreamingRecordReader provides memory-efficient record reading
+// StreamingRecordReader provides memory-efficient record reading for zero-knowledge processing
 type StreamingRecordReader struct {
 	csvDB        *db.Database
 	batchSize    int
@@ -61,7 +62,7 @@ func NewStreamingRecordReader(csvDB *db.Database, fields []string, batchSize int
 	}, nil
 }
 
-// ReadBatch reads the next batch of records
+// ReadBatch reads the next batch of records and converts to PPRL format
 func (r *StreamingRecordReader) ReadBatch() (*RecordBatch, error) {
 	// Get records from database in batches
 	rawRecords, err := (*r.csvDB).List(r.offset, r.batchSize)
@@ -73,8 +74,8 @@ func (r *StreamingRecordReader) ReadBatch() (*RecordBatch, error) {
 		return nil, io.EOF // No more records
 	}
 
-	// Convert raw records to PatientRecord format
-	var records []PatientRecord
+	// Convert raw records to PPRL Record format
+	var records []*pprl.Record
 	sharedMinHash, err := GetGlobalMinHash()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get global MinHash: %w", err)
@@ -108,11 +109,17 @@ func (r *StreamingRecordReader) ReadBatch() (*RecordBatch, error) {
 			return nil, fmt.Errorf("failed to compute MinHash signature: %w", err)
 		}
 
-		records = append(records, PatientRecord{
-			ID:               record["id"],
-			BloomFilter:      bf,
-			MinHash:          recordMinHash,
-			MinHashSignature: signature,
+		// Encode Bloom filter to base64
+		bloomData, err := bf.ToBase64()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode Bloom filter: %w", err)
+		}
+
+		records = append(records, &pprl.Record{
+			ID:        record["id"],
+			BloomData: bloomData,
+			MinHash:   signature,
+			QGramData: "", // Not used in streaming
 		})
 	}
 
@@ -131,15 +138,16 @@ func (r *StreamingRecordReader) HasMore() bool {
 	return true // We'll rely on ReadBatch returning io.EOF
 }
 
-// NewMatchResultWriter creates a new streaming result writer
-func NewMatchResultWriter(timestamp, connID string) (*MatchResultWriter, error) {
+// NewZKMatchResultWriter creates a new zero-knowledge streaming result writer
+// ONLY writes matches - no other information
+func NewZKMatchResultWriter(timestamp, connID string) (*ZKMatchResultWriter, error) {
 	// Ensure output directory exists
 	if err := EnsureOutputDirectory(); err != nil {
 		return nil, fmt.Errorf("failed to ensure output directory: %w", err)
 	}
 
-	// Create CSV file
-	csvFilename := fmt.Sprintf("out/matches_%s_%s.csv", timestamp, connID)
+	// Create CSV file for ONLY matches
+	csvFilename := fmt.Sprintf("out/zk_matches_%s_%s.csv", timestamp, connID)
 	csvFile, err := os.Create(csvFilename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CSV file: %w", err)
@@ -147,15 +155,15 @@ func NewMatchResultWriter(timestamp, connID string) (*MatchResultWriter, error) 
 
 	writer := csv.NewWriter(csvFile)
 
-	// Write CSV header
-	header := []string{"Receiver_ID", "Sender_ID", "Match_Score", "Hamming_Distance", "Timestamp"}
+	// Write CSV header - ONLY essential match information
+	header := []string{"Local_ID", "Peer_ID", "Timestamp"}
 	if err := writer.Write(header); err != nil {
 		csvFile.Close()
 		return nil, fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
 	// Create JSON file
-	jsonFilename := fmt.Sprintf("out/matches_%s_%s.json", timestamp, connID)
+	jsonFilename := fmt.Sprintf("out/zk_matches_%s_%s.json", timestamp, connID)
 	jsonFile, err := os.Create(jsonFilename)
 	if err != nil {
 		csvFile.Close()
@@ -169,9 +177,9 @@ func NewMatchResultWriter(timestamp, connID string) (*MatchResultWriter, error) 
 		return nil, fmt.Errorf("failed to start JSON array: %w", err)
 	}
 
-	Info("Created streaming result writers: %s, %s", csvFilename, jsonFilename)
+	Info("Created zero-knowledge streaming result writers: %s, %s", csvFilename, jsonFilename)
 
-	return &MatchResultWriter{
+	return &ZKMatchResultWriter{
 		file:     csvFile,
 		writer:   writer,
 		jsonFile: jsonFile,
@@ -180,15 +188,13 @@ func NewMatchResultWriter(timestamp, connID string) (*MatchResultWriter, error) 
 	}, nil
 }
 
-// WriteMatch writes a single match result immediately
-func (w *MatchResultWriter) WriteMatch(result *match.MatchResult) error {
-	// Write to CSV
+// WriteMatch writes a single zero-knowledge match result (ONLY if it matches)
+func (w *ZKMatchResultWriter) WriteMatch(result *match.PrivateMatchResult) error {
+	// Write to CSV - ONLY the matching pair
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	row := []string{
-		result.ID1,
-		result.ID2,
-		fmt.Sprintf("%.6f", result.MatchScore),
-		fmt.Sprintf("%d", result.HammingDistance),
+		result.LocalID,
+		result.PeerID,
 		timestamp,
 	}
 
@@ -202,7 +208,7 @@ func (w *MatchResultWriter) WriteMatch(result *match.MatchResult) error {
 		return fmt.Errorf("failed to flush CSV: %w", err)
 	}
 
-	// Write to JSON
+	// Write to JSON - ONLY essential match information
 	if !w.isFirst {
 		if _, err := w.jsonFile.WriteString(",\n"); err != nil {
 			return fmt.Errorf("failed to write JSON separator: %w", err)
@@ -211,13 +217,11 @@ func (w *MatchResultWriter) WriteMatch(result *match.MatchResult) error {
 		w.isFirst = false
 	}
 
-	// Create JSON record
+	// Create JSON record with ZERO information leakage
 	jsonRecord := map[string]interface{}{
-		"receiver_id":      result.ID1,
-		"sender_id":        result.ID2,
-		"match_score":      result.MatchScore,
-		"hamming_distance": result.HammingDistance,
-		"timestamp":        timestamp,
+		"local_id":  result.LocalID,
+		"peer_id":   result.PeerID,
+		"timestamp": timestamp,
 	}
 
 	jsonData, err := json.MarshalIndent(jsonRecord, "  ", "  ")
@@ -233,148 +237,92 @@ func (w *MatchResultWriter) WriteMatch(result *match.MatchResult) error {
 	return nil
 }
 
-// Close finalizes and closes the result writers
-func (w *MatchResultWriter) Close() error {
-	var firstErr error
-
+// Close finalizes and closes all output files
+func (w *ZKMatchResultWriter) Close() error {
 	// Close CSV
-	if w.writer != nil {
-		w.writer.Flush()
-		if err := w.writer.Error(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("CSV writer error: %w", err)
-		}
+	w.writer.Flush()
+	if err := w.writer.Error(); err != nil {
+		return fmt.Errorf("failed to flush CSV on close: %w", err)
+	}
+	if err := w.file.Close(); err != nil {
+		return fmt.Errorf("failed to close CSV file: %w", err)
 	}
 
-	if w.file != nil {
-		if err := w.file.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("CSV file close error: %w", err)
-		}
+	// Close JSON array and file
+	if _, err := w.jsonFile.WriteString("\n]"); err != nil {
+		return fmt.Errorf("failed to close JSON array: %w", err)
+	}
+	if err := w.jsonFile.Close(); err != nil {
+		return fmt.Errorf("failed to close JSON file: %w", err)
 	}
 
-	// Close JSON
-	if w.jsonFile != nil {
-		// End JSON array
-		if _, err := w.jsonFile.WriteString("\n]\n"); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("JSON end array error: %w", err)
-		}
-
-		if err := w.jsonFile.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("JSON file close error: %w", err)
-		}
-	}
-
-	Info("Closed result writers with %d matches written", w.count)
-	return firstErr
+	Info("Closed result files. Total matches written: %d", w.count)
+	return nil
 }
 
-// GetCount returns the number of matches written
-func (w *MatchResultWriter) GetCount() int {
+// GetCount returns the number of matches written (ONLY information revealed)
+func (w *ZKMatchResultWriter) GetCount() int {
 	return w.count
 }
 
-// StreamingMatcher provides memory-efficient matching operations
-type StreamingMatcher struct {
-	config           *StreamingConfig
-	resultWriter     *MatchResultWriter
-	totalComparisons int
-	totalMatches     int
+// ZKStreamingMatcher performs zero-knowledge streaming matching
+type ZKStreamingMatcher struct {
+	config       *StreamingConfig
+	resultWriter *ZKMatchResultWriter
+	fuzzyMatcher *match.FuzzyMatcher
+	matchCount   int // ONLY count matches - no other statistics
 }
 
-// NewStreamingMatcher creates a new streaming matcher
-func NewStreamingMatcher(config *StreamingConfig, resultWriter *MatchResultWriter) *StreamingMatcher {
-	return &StreamingMatcher{
+// NewZKStreamingMatcher creates a new zero-knowledge streaming matcher
+func NewZKStreamingMatcher(config *StreamingConfig, resultWriter *ZKMatchResultWriter) *ZKStreamingMatcher {
+	// Configure zero-knowledge fuzzy matcher
+	fuzzyConfig := &match.FuzzyMatchConfig{
+		Party: config.Party,
+	}
+
+	return &ZKStreamingMatcher{
 		config:       config,
 		resultWriter: resultWriter,
+		fuzzyMatcher: match.NewFuzzyMatcher(fuzzyConfig),
+		matchCount:   0,
 	}
 }
 
-// MatchBatchAgainstSender performs streaming matching of a receiver batch against sender data
-func (m *StreamingMatcher) MatchBatchAgainstSender(
-	receiverBatch *RecordBatch,
-	senderData MatchingData,
+// MatchBatchAgainstPeer performs zero-knowledge matching between batches
+func (m *ZKStreamingMatcher) MatchBatchAgainstPeer(
+	localBatch *RecordBatch,
+	peerRecords []*pprl.Record,
 	connID string,
 ) error {
 
-	batchStart := time.Now()
-	batchComparisons := 0
-	batchMatches := 0
-
-	for _, receiverRecord := range receiverBatch.Records {
-		for senderID, senderBloomData := range senderData.Records {
-			batchComparisons++
-			m.totalComparisons++
-
-			// Decode sender Bloom filter
-			senderBF, err := pprl.BloomFromBase64(senderBloomData)
+	for _, localRecord := range localBatch.Records {
+		for _, peerRecord := range peerRecords {
+			// Perform zero-knowledge comparison
+			result, err := m.fuzzyMatcher.CompareRecords(localRecord, peerRecord)
 			if err != nil {
-				Debug("Failed to decode sender Bloom filter: %v", err)
-				continue
+				continue // Continue processing - no error information leaked
 			}
 
-			// Calculate Hamming distance
-			hammingDist, err := receiverRecord.BloomFilter.HammingDistance(senderBF)
-			if err != nil {
-				Debug("Failed to calculate Hamming distance: %v", err)
-				continue
-			}
-
-			// Calculate match score using PROVEN working method from validate command
-			bfSize := receiverRecord.BloomFilter.GetSize()
-			matchScore := 1.0
-			if hammingDist > 0 {
-				matchScore = 1.0 - (float64(hammingDist) / float64(bfSize))
-			}
-
-			// Calculate Jaccard similarity for additional scoring
-			var jaccardSim float64
-			// For Bloom filters, use Hamming-based approximation for consistency
-			jaccardSim = 1.0 - (float64(hammingDist) / float64(bfSize))
-
-			// Determine if this is a match based on BOTH thresholds (same as FuzzyMatcher)
-			// Fixed: Now properly uses both Hamming AND Jaccard thresholds
-			isMatch := hammingDist <= m.config.HammingThreshold && jaccardSim >= m.config.JaccardThreshold
-
-			// Create match result
-			result := &match.MatchResult{
-				ID1:               receiverRecord.ID,
-				ID2:               senderID,
-				MatchScore:        matchScore, // Use normalized 0-1 score
-				JaccardSimilarity: jaccardSim, // For compatibility
-				HammingDistance:   hammingDist,
-				IsMatch:           isMatch,
-			}
-
-			// Write ALL matches that meet the threshold (same as validate)
-			if isMatch {
-				// Write result immediately (streaming)
+			// Only write if it's a match (result will be nil for non-matches)
+			if result != nil {
 				if err := m.resultWriter.WriteMatch(result); err != nil {
 					return fmt.Errorf("failed to write match result: %w", err)
 				}
-
-				batchMatches++
-				m.totalMatches++
-
-				// Debug first few matches found
-				if m.totalMatches <= 5 {
-					Debug("Match #%d: %s <-> %s (Hamming: %d ≤ %d, Jaccard: %.3f ≥ %.3f, Score: %.6f)",
-						m.totalMatches, receiverRecord.ID, senderID, hammingDist, m.config.HammingThreshold, jaccardSim, m.config.JaccardThreshold, matchScore)
-				}
+				m.matchCount++
 			}
 		}
 	}
 
-	duration := time.Since(batchStart)
+	// Log minimal progress information (no dataset details)
 	if m.config.EnableProgressLog {
-		Info("Batch %d: %d comparisons, %d matches in %v (avg: %v/comparison) - using Hamming ≤ %d AND Jaccard ≥ %.3f",
-			receiverBatch.Offset/m.config.BatchSize+1,
-			batchComparisons, batchMatches, duration,
-			duration/time.Duration(batchComparisons), m.config.HammingThreshold, m.config.JaccardThreshold)
+		Info("Processed batch with %d local records against %d peer records",
+			len(localBatch.Records), len(peerRecords))
 	}
 
 	return nil
 }
 
-// GetStats returns current matching statistics
-func (m *StreamingMatcher) GetStats() (int, int) {
-	return m.totalComparisons, m.totalMatches
+// GetMatchCount returns ONLY the number of matches found (no other statistics)
+func (m *ZKStreamingMatcher) GetMatchCount() int {
+	return m.matchCount
 }
