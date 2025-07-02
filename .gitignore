@@ -65,3 +65,7 @@ threshold_tester.py
 
 # build files
 *.exe
+
+# encryption
+*.key
+*.enc

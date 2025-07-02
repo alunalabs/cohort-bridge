@@ -213,16 +213,9 @@ func performTokenizationStep(cfg *config.Config) (string, error) {
 
 	tokenizedFile := "tokenized_data.csv"
 
-	// Use the same tokenization logic as the tokenize command
-	tokenizeArgs := []string{
-		"-input", filepath.Join("..", cfg.Database.Filename),
-		"-output", tokenizedFile,
-		"-main-config", filepath.Join("..", "config.yaml"),
-		"-force",         // Skip confirmations
-		"-no-encryption", // For simplicity in workflow mode
-	}
-
-	if err := runTokenizeCommandInternal(tokenizeArgs, cfg.Database.Fields); err != nil {
+	// Use direct tokenization without external config dependency
+	inputPath := filepath.Join("..", cfg.Database.Filename)
+	if err := performRealTokenization(inputPath, tokenizedFile, cfg.Database.Fields); err != nil {
 		return "", fmt.Errorf("tokenization failed: %v", err)
 	}
 
@@ -699,7 +692,16 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 		// Extract field values for this record
 		var fieldValues []string
 		for _, field := range fields {
-			if value, exists := record[field]; exists && value != "" {
+			// Extract actual field name (remove type prefix like "name:", "date:", etc.)
+			fieldName := field
+			if strings.Contains(field, ":") {
+				parts := strings.Split(field, ":")
+				if len(parts) == 2 {
+					fieldName = parts[1]
+				}
+			}
+
+			if value, exists := record[fieldName]; exists && value != "" {
 				fieldValues = append(fieldValues, value)
 			}
 		}
@@ -884,6 +886,9 @@ func runPPRLCommand(args []string) {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Debug: Print loaded config details
+	fmt.Printf("🐛 Debug - Loaded config: Peer.Host='%s', Peer.Port=%d, ListenPort=%d\n", cfg.Peer.Host, cfg.Peer.Port, cfg.ListenPort)
 
 	// Validate config has required fields
 	if cfg.Peer.Host == "" || cfg.Peer.Port == 0 {

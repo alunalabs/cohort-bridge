@@ -32,6 +32,7 @@ func main() {
 			runValidateCommand(args)
 		case "pprl":
 			runPPRLCommand(args)
+
 		case "-help", "--help", "help":
 			showMainHelp()
 		case "-version", "--version", "version":
@@ -139,6 +140,7 @@ func showMainHelp() {
 	fmt.Println("  send        📡 Network operations for secure communication")
 	fmt.Println("  validate    🔬 Test results against ground truth")
 	fmt.Println("  pprl        🔗 Peer-to-peer privacy-preserving record linkage")
+	fmt.Println("  workflows   ⚙️  Orchestrate complex PPRL operations")
 	fmt.Println()
 	fmt.Println()
 	fmt.Println("GLOBAL OPTIONS:")

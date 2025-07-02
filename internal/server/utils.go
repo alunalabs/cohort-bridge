@@ -82,7 +82,12 @@ func LoadTokenizedRecords(filename string, isEncrypted bool, encryptionKey strin
 	var actualFilename string
 	var needsCleanup bool
 
-	// Handle encryption if specified
+	// Auto-detect encryption if filename ends with .enc
+	if !isEncrypted && strings.HasSuffix(filename, ".enc") {
+		isEncrypted = true
+	}
+
+	// Handle encryption if specified or auto-detected
 	if isEncrypted {
 		var keyHex string
 		var err error
@@ -421,7 +426,24 @@ func loadKeyFromFile(keyFile string) (string, error) {
 		return "", fmt.Errorf("failed to read key file: %w", err)
 	}
 
-	keyHex := strings.TrimSpace(string(keyData))
+	// Parse the file line by line, ignoring comments
+	lines := strings.Split(string(keyData), "\n")
+	var keyHex string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// First non-comment line should be the key
+		keyHex = line
+		break
+	}
+
+	if keyHex == "" {
+		return "", fmt.Errorf("no encryption key found in file")
+	}
 
 	// Validate hex format
 	if _, err := hex.DecodeString(keyHex); err != nil {

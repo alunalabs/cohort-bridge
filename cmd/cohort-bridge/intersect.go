@@ -10,7 +10,7 @@ import (
 
 	"github.com/auroradata-ai/cohort-bridge/internal/crypto"
 	"github.com/auroradata-ai/cohort-bridge/internal/match"
-	"github.com/auroradata-ai/cohort-bridge/internal/pprl"
+	"github.com/auroradata-ai/cohort-bridge/internal/server"
 )
 
 func runIntersectCommand(args []string) {
@@ -144,25 +144,16 @@ func performZeroKnowledgeIntersection(dataset1, dataset2, outputFile string, par
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// Load tokenized datasets
-	storage1, err := pprl.NewStorage(dataset1)
-	if err != nil {
-		return fmt.Errorf("failed to create storage for dataset1: %w", err)
-	}
-
-	storage2, err := pprl.NewStorage(dataset2)
-	if err != nil {
-		return fmt.Errorf("failed to create storage for dataset2: %w", err)
-	}
-
 	fmt.Println("📂 Loading tokenized datasets...")
-	records1, err := storage1.LoadAll()
+
+	// Load tokenized datasets using server's secure loading (handles encrypted CSV files)
+	records1, err := server.LoadTokenizedRecords(dataset1, false, "", "")
 	if err != nil {
 		return fmt.Errorf("failed to load dataset1: %w", err)
 	}
 	fmt.Printf("   ✅ Loaded %d records from dataset1\n", len(records1))
 
-	records2, err := storage2.LoadAll()
+	records2, err := server.LoadTokenizedRecords(dataset2, false, "", "")
 	if err != nil {
 		return fmt.Errorf("failed to load dataset2: %w", err)
 	}

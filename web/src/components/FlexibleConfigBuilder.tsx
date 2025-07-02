@@ -41,6 +41,7 @@ export default function FlexibleConfigBuilder({
     const [missingFields, setMissingFields] = useState<string[]>([]);
     const [filename, setFilename] = useState(`config_${title.toLowerCase().replace(/\s+/g, '_')}.yaml`);
     const [showImportWarning, setShowImportWarning] = useState(false);
+    const [importSuccess, setImportSuccess] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const allSections: ConfigSection[] = [
@@ -423,21 +424,55 @@ export default function FlexibleConfigBuilder({
                 enabled: sectionsToEnable.includes(section.id)
             })));
 
-            // Reset form with imported data
-            methods.reset(parsedConfig);
+            // Process the imported data for UI compatibility
+            const processedConfig = { ...parsedConfig };
 
-            // Clear any previous errors
+            // Convert database fields to UI format if needed
+            if (processedConfig.database?.fields) {
+                const fields = processedConfig.database.fields;
+                const fieldMappings: { column: string; normalization: string }[] = [];
+
+                fields.forEach((field: string) => {
+                    if (field.includes(':')) {
+                        // Format: "normalization:field_name"
+                        const [normalization, column] = field.split(':');
+                        fieldMappings.push({ column, normalization });
+                    } else {
+                        // Simple field name without normalization
+                        fieldMappings.push({ column: field, normalization: '' });
+                    }
+                });
+
+                // Set UI field mappings for the database section
+                processedConfig._ui_field_mappings = fieldMappings;
+            }
+
+            // Set encryption UI state based on imported encryption fields
+            if (processedConfig.database?.encryption_key || processedConfig.database?.encryption_key_file) {
+                processedConfig._ui_is_encrypted = true;
+            } else {
+                processedConfig._ui_is_encrypted = false;
+            }
+
+            // Reset form with processed data
+            methods.reset(processedConfig);
+
+            // Clear any previous errors and show success
             setValidationError('');
             setMissingFields([]);
+
+            // Show success message
+            setImportSuccess(true);
+            setTimeout(() => setImportSuccess(false), 3000);
 
             // Auto-generate preview with imported data
             setTimeout(() => {
                 generateConfiguration();
-            }, 200);
+            }, 500); // Increased timeout to ensure form is fully updated
 
         } catch (error) {
             console.error('Error importing config:', error);
-            setValidationError('Failed to parse YAML file. Please check the file format.');
+            setValidationError(`Failed to parse YAML file: ${error instanceof Error ? error.message : 'Unknown error'}. Please check the file format.`);
         }
 
         // Reset file input
@@ -513,7 +548,7 @@ export default function FlexibleConfigBuilder({
                 </div>
             </header>
 
-            <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${showImportWarning ? 'pt-24' : ''}`}>
+            <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${showImportWarning || importSuccess ? 'pt-24' : ''}`}>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Configuration Sections Sidebar */}
                     <div className="lg:col-span-1 space-y-4">
@@ -662,6 +697,31 @@ export default function FlexibleConfigBuilder({
                                 Continue Import
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Import Success Banner */}
+            {importSuccess && (
+                <div className="fixed top-0 left-0 right-0 z-50 bg-green-50 border-b border-green-200 p-4">
+                    <div className="max-w-7xl mx-auto flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                            <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                                <Check className="h-4 w-4 text-green-600" />
+                            </div>
+                            <div>
+                                <h3 className="font-medium text-green-800">Configuration Imported Successfully</h3>
+                                <p className="text-sm text-green-700">
+                                    Your configuration file has been loaded and the form has been populated with the imported settings.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setImportSuccess(false)}
+                            className="px-4 py-2 text-sm border border-green-300 text-green-700 rounded-lg hover:bg-green-100 transition-colors"
+                        >
+                            Dismiss
+                        </button>
                     </div>
                 </div>
             )}
