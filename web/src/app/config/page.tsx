@@ -102,7 +102,7 @@ export default function ConfigPage() {
                     </p>
                     <div className="flex justify-center space-x-3">
                         <button
-                            onClick={() => router.push('/get-started')}
+                            onClick={() => router.push('/docs')}
                             className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded text-sm font-medium hover:from-blue-600 hover:to-purple-600 transition-all"
                         >
                             Install CLI

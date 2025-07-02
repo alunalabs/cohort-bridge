@@ -71,18 +71,18 @@ export default function HomePage() {
                         </div>
                         <div className="flex items-center space-x-4">
                             <button
-                                onClick={() => router.push('/get-started')}
+                                onClick={() => router.push('/docs')}
                                 className="text-gray-600 hover:text-gray-900 transition-colors text-sm font-medium"
                             >
-                                Install CLI
+                                Documentation
                             </button>
                             <a
-                                href="https://github.com/alunalabs/cohort-bridge#readme"
+                                href="https://github.com/alunalabs/cohort-bridge"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-gray-600 hover:text-gray-900 transition-colors text-sm font-medium"
                             >
-                                Documentation
+                                GitHub
                             </a>
                         </div>
                     </div>
@@ -108,7 +108,14 @@ export default function HomePage() {
                             Build Configuration
                         </button>
                         <button
-                            onClick={() => router.push('/get-started')}
+                            onClick={() => router.push('/docs')}
+                            className="inline-flex items-center px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:border-gray-400 hover:text-gray-900 transition-colors bg-white"
+                        >
+                            <FileText className="mr-2 h-5 w-5" />
+                            View Documentation
+                        </button>
+                        <button
+                            onClick={() => router.push('/docs')}
                             className="inline-flex items-center px-6 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:border-gray-400 hover:text-gray-900 transition-colors bg-white"
                         >
                             <Terminal className="mr-2 h-5 w-5" />
@@ -235,7 +242,7 @@ export default function HomePage() {
                             Start Configuring
                         </button>
                         <button
-                            onClick={() => router.push('/get-started')}
+                            onClick={() => router.push('/docs')}
                             className="inline-flex items-center px-6 py-3 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
                         >
                             <Github className="mr-2 h-4 w-4" />
