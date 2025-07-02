@@ -124,28 +124,6 @@ export default function HomePage() {
                     </div>
                 </div>
 
-                {/* New Features Highlight */}
-                <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-6 mb-12">
-                    <div className="flex items-start space-x-4">
-                        <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                            <Settings className="h-6 w-6 text-white" />
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-bold text-gray-900 mb-2">🆕 New: Data Normalization</h3>
-                            <p className="text-gray-700 mb-3">
-                                Automatically standardize your data for improved matching accuracy. Configure normalization methods
-                                for names, dates, ZIP codes, and gender fields to catch more matches.
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">Name Standardization</span>
-                                <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs font-medium">Date Formatting</span>
-                                <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">ZIP Code Normalization</span>
-                                <span className="bg-pink-100 text-pink-800 px-2 py-1 rounded-full text-xs font-medium">Gender Standardization</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 {/* Configuration Types */}
                 <div className="mb-16">
                     <div className="text-center mb-8">
