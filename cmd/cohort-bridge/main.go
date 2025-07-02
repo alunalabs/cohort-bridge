@@ -9,12 +9,6 @@ import (
 )
 
 func main() {
-	// Print banner
-	fmt.Println("🤖 CohortBridge - PPRL Orchestrator")
-	fmt.Println("====================================")
-	fmt.Println("Privacy-Preserving Record Linkage System")
-	fmt.Println()
-
 	// Handle command line arguments
 	if len(os.Args) > 1 {
 		// Handle subcommands
@@ -33,9 +27,9 @@ func main() {
 		case "pprl":
 			runPPRLCommand(args)
 
-		case "-help", "--help", "help":
+		case "-help", "--help", "help", "-h":
 			showMainHelp()
-		case "-version", "--version", "version":
+		case "-version", "--version", "version", "-v":
 			showVersion()
 		default:
 			fmt.Printf("❌ Unknown subcommand: %s\n\n", subcommand)
@@ -50,6 +44,11 @@ func main() {
 }
 
 func runInteractiveMode() {
+	// Print banner
+	fmt.Println("🤖 CohortBridge - PPRL Orchestrator")
+	fmt.Println("====================================")
+	fmt.Println("Privacy-Preserving Record Linkage System")
+	fmt.Println()
 	fmt.Println("🎯 Interactive Mode")
 
 	options := []string{
@@ -165,7 +164,5 @@ func showMainHelp() {
 }
 
 func showVersion() {
-	fmt.Println("🤖 CohortBridge v1.0.0")
-	fmt.Println("Privacy-Preserving Record Linkage System")
-	fmt.Println("Built with ❤️  for secure healthcare data collaboration")
+	fmt.Println("🤖 CohortBridge v0.1.0")
 }

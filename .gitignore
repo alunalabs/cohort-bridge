@@ -4,6 +4,7 @@
 *.so
 *.dylib
 out/
+build/
 
 # Test outputs and temporary files
 logs/
