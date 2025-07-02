@@ -5,20 +5,11 @@ database:
   type: csv
   filename: data/patients.csv  # Path to your patient data CSV file
   fields:
-    - FIRST        # Patient first name column
-    - LAST         # Patient last name column  
-    - DATE_OF_BIRTH # Date of birth column
-    - ZIP          # ZIP code column
-    - GENDER       # Gender column
-  # Normalization configuration
-  # Format: normalization_method:field_name
-  # Supported methods: name, date, gender, zip
-  normalization:
-    - name:FIRST        # Apply name normalization to FIRST field (lowercase, remove punctuation, normalize spaces)
-    - name:LAST         # Apply name normalization to LAST field 
-    - date:DATE_OF_BIRTH # Apply date normalization to DATE_OF_BIRTH field (standardize to YYYY-MM-DD)
-    - zip:ZIP           # Apply ZIP normalization to ZIP field (extract first 5 digits)
-    - gender:GENDER     # Apply gender normalization to GENDER field (standardize to m/f/nb/o/u)
+    - name:FIRST              # Patient first name column with name normalization
+    - name:LAST               # Patient last name column with name normalization
+    - date:DATE_OF_BIRTH      # Date of birth column with date normalization
+    - zip:ZIP                 # ZIP code column with ZIP normalization
+    - gender:GENDER           # Gender column with gender normalization
 
 # Network configuration for peer-to-peer matching
 peer:
@@ -59,6 +50,18 @@ matching:
   hamming_threshold: 20      # Maximum Hamming distance for matches
   jaccard_threshold: 0.7     # Minimum Jaccard similarity for matches
 
-# Cryptographic key for secure communications
-# Generate a new key for production use: openssl rand -hex 32
-private_key: YOUR_PRIVATE_KEY_HERE_32_HEX_CHARACTERS 
+# Security configuration
+security:
+  rate_limit_per_min: 5 
+
+# Note: Normalization Methods Applied:
+# - name:FIRST        - Standardize name fields (lowercase, remove punctuation, normalize spaces)
+# - name:LAST         - Apply to any name field in your data
+# - date:DATE_OF_BIRTH - Standardize dates to YYYY-MM-DD format
+# - zip:ZIP           - Extract first 5 digits from ZIP codes
+# - gender:GENDER     - Standardize gender to single characters (m/f/nb/o/u)
+#
+# Benefits:
+# - "Mary-Jane O'Connor" and "MARYJANE OCONNOR" will match after name normalization
+# - "12/25/2023" and "2023-12-25" will match after date normalization  
+# - "12345-6789" and "12345 6789" will match after ZIP normalization 

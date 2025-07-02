@@ -1,50 +1,55 @@
+# PostgreSQL Database Configuration for CohortBridge
+# Suitable for large-scale deployments with database integration
+
 database:
-  type: "postgres"
-  host: "localhost"
+  type: postgres
+  host: localhost
   port: 5432
-  user: "cohort_user"
-  password: "your_password_here"
-  dbname: "cohort_database"
-  table: "users"
+  user: cohort_user
+  password: secure_password_here
+  dbname: patient_records
+  table: patients
   fields:
-    - "id"
-    - "first_name"
-    - "last_name"
-    - "email"
-    - "date_of_birth"
+    - name:first_name         # First name with normalization
+    - name:last_name          # Last name with normalization
+    - date:birth_date         # Date of birth with normalization
+    - zip:postal_code         # ZIP code with normalization
+    - gender:gender           # Gender with normalization
+  is_tokenized: false
 
-# Normalization configuration
-  # Normalization configuration
-  normalization:
-    - name:first_name      # Apply name normalization to first_name field
-    - name:last_name       # Apply name normalization to last_name field
-    - date:date_of_birth   # Apply date normalization to date_of_birth field
+# Network configuration
 peer:
+  host: 192.168.1.50
+  port: 8443
+
+listen_port: 8443
+
+# Security configuration
 security:
-  allowed_ips:
-    - "127.0.0.1"
-    - "::1"
-  require_ip_check: true
-  max_connections: 10
-  rate_limit_per_min: 5
+  rate_limit_per_min: 10  # Higher rate limit for database operations
 
+# Timeout configuration
 timeouts:
-  connection_timeout: 30s
-  read_timeout: 60s
-  write_timeout: 60s
-  idle_timeout: 300s
-  handshake_timeout: 30s
+  connection_timeout: 45s
+  read_timeout: 180s      # Longer timeouts for database queries
+  write_timeout: 180s
+  idle_timeout: 600s
+  handshake_timeout: 45s
 
+# Logging configuration
 logging:
   level: "info"
-  file: ""
-  max_size: 100
-  max_backups: 3
-  max_age: 30
-  enable_syslog: false
+  file: "logs/postgres_cohort_bridge.log"
+  max_size: 200           # Larger log files for database operations
+  max_backups: 5
+  max_age: 60
   enable_audit: true
-  audit_file: "logs/audit.log"
+  audit_file: "logs/postgres_audit.log"
 
-listen_port: 8080
-private_key: "path/to/private.key"
-public_key: "path/to/public.key" 
+# Matching parameters
+matching:
+  hamming_threshold: 20
+  jaccard_threshold: 0.7
+
+# Note: PostgreSQL integration provides scalable solutions for large datasets
+# with built-in transaction support and data integrity guarantees 

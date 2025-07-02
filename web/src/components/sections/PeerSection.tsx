@@ -93,22 +93,6 @@ export default function PeerSection({ missingFields = [] }: PeerSectionProps) {
                         Port for incoming connections on this system. Must be available and not blocked by firewall.
                     </p>
                 </div>
-
-                {/* Private Key */}
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Private Key (Optional)
-                    </label>
-                    <input
-                        type="text"
-                        {...register('private_key')}
-                        placeholder="Leave empty to auto-generate"
-                        className={getInputClass('private_key', 'font-mono text-sm')}
-                    />
-                    <p className="mt-1 text-xs text-slate-600">
-                        64-character hex key for encryption. Auto-generated if empty. Save this for reuse.
-                    </p>
-                </div>
             </div>
         </div>
     );

@@ -48,8 +48,7 @@ type TokenRecord struct {
 
 // SecureWorkflowConfig holds secure computation configuration
 type SecureWorkflowConfig struct {
-	UseSecureProtocol bool `json:"use_secure_protocol"`
-	Party             int  `json:"party"` // 0 or 1 for two-party protocol
+	Party int `json:"party"` // 0 or 1 for two-party protocol
 }
 
 // runUnifiedWorkflow implements the new unified peer-to-peer workflow

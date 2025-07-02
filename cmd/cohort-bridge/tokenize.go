@@ -186,14 +186,12 @@ func runTokenizeCommand(args []string) {
 	var normalizationConfig map[string]crypto.NormalizationMethod
 	if mainConfig, err := config.Load(*mainConfigFile); err == nil {
 		if len(mainConfig.Database.Fields) > 0 {
-			defaultFields = mainConfig.Database.Fields
+			// Parse fields to extract field names and normalization
+			defaultFields, normalizationConfig = parseFieldsWithNormalization(mainConfig.Database.Fields)
 			fmt.Printf("📋 Using field names from %s: %v\n", *mainConfigFile, defaultFields)
-		}
-
-		// Load normalization configuration
-		if len(mainConfig.Database.Normalization) > 0 {
-			normalizationConfig = crypto.ParseNormalizationConfig(mainConfig.Database.Normalization)
-			fmt.Printf("🔧 Using normalization config: %v\n", mainConfig.Database.Normalization)
+			if len(normalizationConfig) > 0 {
+				fmt.Printf("🔧 Using normalization config: %v\n", normalizationConfig)
+			}
 		}
 	}
 
@@ -990,4 +988,46 @@ func showDecryptHelp() {
 	fmt.Println("NOTE:")
 	fmt.Println("  You must have the correct encryption key to decrypt the file.")
 	fmt.Println("  Keys are either saved as .key files or provided manually.")
+}
+
+// parseFieldsWithNormalization parses fields array that may contain normalization specs
+// Input: ["name:FIRST", "LAST", "date:BIRTHDATE", "ZIP"]
+// Output: (["FIRST", "LAST", "BIRTHDATE", "ZIP"], {"FIRST": "name", "BIRTHDATE": "date"})
+func parseFieldsWithNormalization(fields []string) ([]string, map[string]crypto.NormalizationMethod) {
+	var fieldNames []string
+	normalizationConfig := make(map[string]crypto.NormalizationMethod)
+
+	for _, field := range fields {
+		// Check if field contains normalization specification (method:field)
+		if strings.Contains(field, ":") {
+			parts := strings.Split(field, ":")
+			if len(parts) == 2 {
+				method := strings.ToLower(strings.TrimSpace(parts[0]))
+				fieldName := strings.TrimSpace(parts[1])
+
+				// Add field name
+				fieldNames = append(fieldNames, fieldName)
+
+				// Add normalization method if supported
+				switch method {
+				case "name":
+					normalizationConfig[fieldName] = crypto.NormName
+				case "date":
+					normalizationConfig[fieldName] = crypto.NormDate
+				case "gender":
+					normalizationConfig[fieldName] = crypto.NormGender
+				case "zip":
+					normalizationConfig[fieldName] = crypto.NormZip
+				}
+			} else {
+				// Invalid format, just use as field name
+				fieldNames = append(fieldNames, field)
+			}
+		} else {
+			// Plain field name without normalization
+			fieldNames = append(fieldNames, field)
+		}
+	}
+
+	return fieldNames, normalizationConfig
 }

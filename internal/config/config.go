@@ -16,29 +16,23 @@ type Config struct {
 		Password          string   `yaml:"password"`
 		DBName            string   `yaml:"dbname"`
 		Table             string   `yaml:"table"`
-		Filename          string   `yaml:"filename"`      // Path to data file (raw or tokenized)
-		Fields            []string `yaml:"fields"`        // Only needed when is_tokenized=false
-		Normalization     []string `yaml:"normalization"` // Field normalization specifications like "name:FIRST"
+		Filename          string   `yaml:"filename"` // Path to data file (raw or tokenized)
+		Fields            []string `yaml:"fields"`   // Field definitions including normalization like "name:FIRST"
 		RandomBitsPercent float64  `yaml:"random_bits_percent"`
 		IsTokenized       bool     `yaml:"is_tokenized"`        // Whether the data is already tokenized
-		IsEncrypted       bool     `yaml:"is_encrypted"`        // Whether tokenized data is encrypted
 		EncryptionKey     string   `yaml:"encryption_key"`      // Hex encryption key (optional)
 		EncryptionKeyFile string   `yaml:"encryption_key_file"` // Path to key file (optional)
 	} `yaml:"database"`
 	Matching struct {
-		HammingThreshold  uint32  `yaml:"hamming_threshold"`   // Hamming distance threshold for matches
-		JaccardThreshold  float64 `yaml:"jaccard_threshold"`   // Jaccard similarity threshold
-		UseSecureProtocol bool    `yaml:"use_secure_protocol"` // Whether to use secure protocol
+		HammingThreshold uint32  `yaml:"hamming_threshold"` // Hamming distance threshold for matches
+		JaccardThreshold float64 `yaml:"jaccard_threshold"` // Jaccard similarity threshold
 	} `yaml:"matching"`
 	Peer struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
 	} `yaml:"peer"`
 	Security struct {
-		AllowedIPs      []string `yaml:"allowed_ips"`        // Whitelist of allowed IP addresses
-		RequireIPCheck  bool     `yaml:"require_ip_check"`   // Whether to enforce IP whitelist
-		MaxConnections  int      `yaml:"max_connections"`    // Maximum concurrent connections
-		RateLimitPerMin int      `yaml:"rate_limit_per_min"` // Max connections per minute per IP
+		RateLimitPerMin int `yaml:"rate_limit_per_min"` // Max connections per minute per IP
 	} `yaml:"security"`
 	Timeouts struct {
 		ConnectionTimeout time.Duration `yaml:"connection_timeout"` // Connection establishment timeout
@@ -57,9 +51,7 @@ type Config struct {
 		EnableAudit  bool   `yaml:"enable_audit"`  // Enable audit logging for security events
 		AuditFile    string `yaml:"audit_file"`    // Audit log file path
 	} `yaml:"logging"`
-	ListenPort int    `yaml:"listen_port"`
-	PrivateKey string `yaml:"private_key"`
-	PublicKey  string `yaml:"public_key"`
+	ListenPort int `yaml:"listen_port"`
 }
 
 // SetDefaults sets reasonable default values for new configuration fields
@@ -71,15 +63,8 @@ func (c *Config) SetDefaults() {
 	if c.Matching.JaccardThreshold == 0 {
 		c.Matching.JaccardThreshold = 0.7 // High Jaccard threshold
 	}
-	// UseSecureProtocol defaults to false unless explicitly set
 
 	// Security defaults
-	if len(c.Security.AllowedIPs) == 0 {
-		c.Security.AllowedIPs = []string{"127.0.0.1", "::1"} // localhost only by default
-	}
-	if c.Security.MaxConnections == 0 {
-		c.Security.MaxConnections = 10
-	}
 	if c.Security.RateLimitPerMin == 0 {
 		c.Security.RateLimitPerMin = 5
 	}
@@ -114,6 +99,11 @@ func (c *Config) SetDefaults() {
 	if c.Logging.MaxAge == 0 {
 		c.Logging.MaxAge = 30 // 30 days
 	}
+}
+
+// IsEncrypted returns true if encryption is configured for tokenized data
+func (c *Config) IsEncrypted() bool {
+	return c.Database.EncryptionKey != "" || c.Database.EncryptionKeyFile != ""
 }
 
 func Load(path string) (*Config, error) {

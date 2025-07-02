@@ -8,26 +8,16 @@ export default function SecureConfigPage() {
         database: {
             type: 'csv',
             filename: 'data/patients_secure.csv',
-            fields: ['FIRST', 'LAST', 'BIRTHDATE', 'GENDER', 'ZIP'],
+            fields: ['name:FIRST', 'name:LAST', 'date:BIRTHDATE', 'gender:GENDER', 'zip:ZIP'],
             random_bits_percent: 0.05,
-            normalization: [
-                'name:FIRST',
-                'name:LAST',
-                'date:BIRTHDATE',
-                'gender:GENDER',
-                'zip:ZIP'
-            ],
         },
         peer: {
             host: '192.168.1.100',
             port: 8081,
         },
         listen_port: 8082,
-        private_key: '240c1878d85eebe9d8a80cb7fadda30c854a7a72797c441bd1c547b10ac754b5',
+
         security: {
-            allowed_ips: ['127.0.0.1', '::1', '192.168.1.100', '10.0.0.0/8'],
-            require_ip_check: true,
-            max_connections: 5,
             rate_limit_per_min: 3,
         },
         timeouts: {

@@ -5,19 +5,18 @@ database:
   type: csv
   filename: data/patients.csv  # Path to your patient data CSV file
   fields:
-    - first_name    # Patient first name column
-    - last_name     # Patient last name column  
-    - dob          # Date of birth column (YYYY-MM-DD format)
-    - zip          # ZIP code column
-  # Normalization configuration (optional)
-  # Format: normalization_method:field_name
+    - first_name              # Patient first name column  
+    - last_name               # Patient last name column
+    - dob                     # Date of birth column (YYYY-MM-DD format)
+    - zip                     # ZIP code column
+  # Optional: Add normalization to fields for improved matching accuracy
+  # Use format: method:field_name
   # Supported methods: name, date, gender, zip
-  # Uncomment and customize as needed:
-  # normalization:
-  #   - name:first_name  # Apply name normalization (lowercase, remove punctuation, normalize spaces)
-  #   - name:last_name   # Apply name normalization
-  #   - date:dob         # Apply date normalization (standardize to YYYY-MM-DD)
-  #   - zip:zip          # Apply ZIP normalization (extract first 5 digits)
+  # Examples:
+  #   - name:first_name       # Apply name normalization (lowercase, remove punctuation, normalize spaces)
+  #   - name:last_name        # Apply name normalization
+  #   - date:dob              # Apply date normalization (standardize to YYYY-MM-DD)
+  #   - zip:zip               # Apply ZIP normalization (extract first 5 digits)
 
 # Network configuration for peer-to-peer matching
 peer:
@@ -26,17 +25,29 @@ peer:
 
 listen_port: 8082   # Port to listen on for incoming connections
 
-# Cryptographic key for secure communications
-# Generate a new key for production use: openssl rand -hex 32
-private_key: YOUR_PRIVATE_KEY_HERE_32_HEX_CHARACTERS
+# Security configuration
+security:
+  rate_limit_per_min: 5  # Maximum connections per minute per IP
 
-# Optional: Fuzzy matching parameters
+# Timeout configuration
+timeouts:
+  connection_timeout: 30s
+  read_timeout: 60s
+  write_timeout: 60s
+  idle_timeout: 300s
+  handshake_timeout: 30s
+
+# Logging configuration
+logging:
+  level: "info"
+  file: "logs/cohort-bridge.log"
+  max_size: 100
+  max_backups: 3
+  max_age: 30
+
+# Matching parameters
 matching:
-  bloom_size: 1024           # Size of Bloom filter in bits
-  bloom_hashes: 5            # Number of hash functions
-  minhash_size: 128          # MinHash signature length
-  qgram_length: 2            # Q-gram length for string similarity
-  hamming_threshold: 100     # Maximum Hamming distance for matches
+  hamming_threshold: 20      # Maximum Hamming distance for matches
   jaccard_threshold: 0.7     # Minimum Jaccard similarity for matches
-  qgram_threshold: 0.8       # Minimum Q-gram similarity for matches
-  noise_level: 0.01          # Privacy noise level (0.0-1.0) 
+
+# Note: All protocols use secure matching by default for maximum privacy protection 

@@ -19,8 +19,8 @@ const configSchema = z.object({
     database: z.any(),
     peer: z.any(),
     listen_port: z.any(),
-    private_key: z.string().optional(),
-    public_key: z.string().optional(),
+
+
     security: z.any().optional(),
     timeouts: z.any().optional(),
     logging: z.any().optional(),

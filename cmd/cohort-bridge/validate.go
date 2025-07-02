@@ -704,7 +704,7 @@ func loadDataset(cfg *config.Config, datasetName string) ([]*pprl.Record, error)
 
 	if cfg.Database.IsTokenized {
 		fmt.Printf("   📁 Loading tokenized data from %s\n", cfg.Database.Filename)
-		records, err = server.LoadTokenizedRecords(cfg.Database.Filename, cfg.Database.IsEncrypted, cfg.Database.EncryptionKey, cfg.Database.EncryptionKeyFile)
+		records, err = server.LoadTokenizedRecords(cfg.Database.Filename, cfg.IsEncrypted(), cfg.Database.EncryptionKey, cfg.Database.EncryptionKeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load tokenized records: %v", err)
 		}

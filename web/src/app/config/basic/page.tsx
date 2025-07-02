@@ -8,22 +8,21 @@ export default function BasicConfigPage() {
         database: {
             type: 'csv',
             filename: 'data/patients.csv',
-            fields: ['first_name', 'last_name', 'date_of_birth', 'gender', 'zip_code'],
+            fields: ['name:first_name', 'name:last_name', 'date:date_of_birth', 'gender:gender', 'zip:zip_code'],
             random_bits_percent: 0.0,
-            normalization: [
-                'name:first_name',
-                'name:last_name',
-                'date:date_of_birth',
-                'gender:gender',
-                'zip:zip_code'
-            ],
         },
         peer: {
             host: 'localhost',
             port: 8081,
         },
         listen_port: 8080,
-        private_key: '',
+        security: {
+            rate_limit_per_min: 5,
+        },
+        matching: {
+            hamming_threshold: 20,
+            jaccard_threshold: 0.7,
+        },
     };
 
     return (

@@ -16,12 +16,12 @@ export default function TokenizedConfigPage() {
             port: 8081,
         },
         listen_port: 8080,
-        private_key: '',
         security: {
-            allowed_ips: ['127.0.0.1', '::1', '192.168.1.0/24'],
-            require_ip_check: true,
-            max_connections: 5,
             rate_limit_per_min: 3,
+        },
+        matching: {
+            hamming_threshold: 20,
+            jaccard_threshold: 0.7,
         },
         timeouts: {
             connection_timeout: '30s',

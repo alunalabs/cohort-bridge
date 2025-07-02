@@ -1,52 +1,52 @@
-# Enhanced CohortBridge Configuration with Security, Timeouts, and Logging
-# This configuration demonstrates all available security and reliability features
+# Secure configuration for maximum privacy and security
+# Suitable for production deployments with sensitive data
 
 database:
   type: csv
-  filename: data/patients_a_tiny.csv  # Update to match your actual data files
+  filename: data/patients.csv
   fields:
-    - FIRST      # Updated to match CSV column names
-    - LAST       # Updated to match CSV column names
-    - BIRTHDATE  # Updated to match CSV column names
-    - ZIP        # Matches existing column name
-  random_bits_percent: 0.0  # Percentage of random bits to add to Bloom filters (0.0-1.0)
+    - name:first_name         # First name with normalization
+    - name:last_name          # Last name with normalization  
+    - date:date_of_birth      # Date of birth with normalization
+    - zip:zip_code            # ZIP code with normalization
+    - gender:gender           # Gender with normalization
+  is_tokenized: false
+  # Encryption will be inferred from presence of encryption_key or encryption_key_file
+  encryption_key_file: "data/encryption.key"
 
-# Normalization configuration
-  # Normalization configuration
-  normalization:
-    - name:FIRST      # Apply name normalization to FIRST field
-    - name:LAST       # Apply name normalization to LAST field
-    - date:BIRTHDATE  # Apply date normalization to BIRTHDATE field
-    - zip:ZIP         # Apply ZIP normalization to ZIP field
+# Network configuration
 peer:
+  host: 192.168.1.100
+  port: 8443
+
+listen_port: 8443
+
+# Security configuration
 security:
-  allowed_ips:           # Whitelist of allowed IP addresses
-    - "127.0.0.1"        # localhost IPv4
-    - "::1"              # localhost IPv6
-    - "192.168.1.100"    # Example: specific trusted IP
-  require_ip_check: true # Whether to enforce IP whitelist (set false to disable)
-  max_connections: 5     # Maximum concurrent connections
-  rate_limit_per_min: 10 # Maximum connection attempts per minute per IP
+  rate_limit_per_min: 3  # Conservative rate limiting
 
-# Timeout configuration for network operations
+# Timeout configuration
 timeouts:
-  connection_timeout: 30s  # Time to wait for connection establishment
-  read_timeout: 120s       # Time to wait for reading data
-  write_timeout: 120s      # Time to wait for writing data
-  idle_timeout: 300s       # Maximum idle time before closing connection (5 minutes)
-  handshake_timeout: 45s   # Time to wait for protocol handshake
+  connection_timeout: 60s
+  read_timeout: 120s
+  write_timeout: 120s
+  idle_timeout: 600s
+  handshake_timeout: 60s
 
-# Logging configuration for monitoring and security
+# Comprehensive logging for audit compliance
 logging:
-  level: info              # Log level: debug, info, warn, error
-  file: logs/cohort.log    # Log file path (empty for stdout only)
-  max_size: 100            # Maximum log file size in MB
-  max_backups: 3           # Maximum number of old log files to keep
-  max_age: 30              # Maximum age of log files in days
-  enable_syslog: false     # Enable syslog output (disabled for Windows compatibility)
-  enable_audit: true       # Enable security audit logging
-  audit_file: logs/audit.log # Audit log file path
+  level: "info"
+  file: "logs/secure_cohort_bridge.log"
+  max_size: 50
+  max_backups: 10
+  max_age: 90
+  enable_syslog: true
+  enable_audit: true
+  audit_file: "logs/security_audit.log"
 
-listen_port: 8082        # Port to listen on for incoming connections
-private_key: 240c1878d85eebe9d8a80cb7fadda30c854a7a72797c441bd1c547b10ac754b5  # Generated private key
-public_key: ""           # Will be derived from private key automatically 
+# Conservative matching thresholds for high precision
+matching:
+  hamming_threshold: 15      # Stricter threshold
+  jaccard_threshold: 0.8     # Higher similarity requirement
+
+# Note: All protocols use secure zero-knowledge matching by default

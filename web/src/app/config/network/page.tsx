@@ -8,26 +8,16 @@ export default function NetworkConfigPage() {
         database: {
             type: 'csv',
             filename: 'data/hospital_a_patients.csv',
-            fields: ['FIRST', 'LAST', 'BIRTHDATE', 'GENDER', 'ZIP'],
+            fields: ['name:FIRST', 'name:LAST', 'date:BIRTHDATE', 'gender:GENDER', 'zip:ZIP'],
             random_bits_percent: 0.02,
-            normalization: [
-                'name:FIRST',
-                'name:LAST',
-                'date:BIRTHDATE',
-                'gender:GENDER',
-                'zip:ZIP'
-            ],
         },
         peer: {
             host: '10.0.1.100',
             port: 8082,
         },
         listen_port: 8081,
-        private_key: 'a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456',
+
         security: {
-            allowed_ips: ['10.0.1.0/24', '192.168.0.0/16', '172.16.0.0/12'],
-            require_ip_check: true,
-            max_connections: 10,
             rate_limit_per_min: 5,
         },
         timeouts: {

@@ -18,8 +18,9 @@ export default function DatabaseSection({ configType, missingFields = [] }: Data
     const { register, watch, setValue } = useFormContext();
 
     const databaseType = watch('database.type');
-    const fieldMappings = watch('database.field_mappings') || [];
+    const fieldMappings = watch('_ui_field_mappings') || [];
     const isTokenized = watch('database.is_tokenized');
+    const isEncrypted = watch('_ui_is_encrypted') || false;
 
     // Initialize with default fields and normalizations on first load
     useEffect(() => {
@@ -31,23 +32,48 @@ export default function DatabaseSection({ configType, missingFields = [] }: Data
                 { column: 'gender', normalization: 'gender' },
                 { column: 'zip_code', normalization: 'zip' }
             ];
-            setValue('database.field_mappings', defaultMappings);
+            setValue('_ui_field_mappings', defaultMappings);
+            // Also update the new fields format
+            updateFieldsFromMappings(defaultMappings);
         }
     }, [fieldMappings.length, isTokenized, setValue]);
 
+    // Clear encryption fields when encryption is disabled
+    useEffect(() => {
+        if (!isEncrypted) {
+            setValue('database.encryption_key', '');
+            setValue('database.encryption_key_file', '');
+        }
+    }, [isEncrypted, setValue]);
+
+    // Convert field mappings to the new fields format
+    const updateFieldsFromMappings = (mappings: FieldMapping[]) => {
+        const fields = mappings.map(mapping => {
+            if (mapping.normalization && mapping.normalization !== '') {
+                return `${mapping.normalization}:${mapping.column}`;
+            }
+            return mapping.column;
+        }).filter(field => field); // Remove empty fields
+        setValue('database.fields', fields);
+    };
+
     const addFieldMapping = () => {
-        setValue('database.field_mappings', [...fieldMappings, { column: '', normalization: '' }]);
+        const newMappings = [...fieldMappings, { column: '', normalization: '' }];
+        setValue('_ui_field_mappings', newMappings);
+        updateFieldsFromMappings(newMappings);
     };
 
     const removeFieldMapping = (index: number) => {
         const newMappings = fieldMappings.filter((_: any, i: number) => i !== index);
-        setValue('database.field_mappings', newMappings);
+        setValue('_ui_field_mappings', newMappings);
+        updateFieldsFromMappings(newMappings);
     };
 
     const updateFieldMapping = (index: number, field: 'column' | 'normalization', value: string) => {
         const newMappings = [...fieldMappings];
         newMappings[index] = { ...newMappings[index], [field]: value };
-        setValue('database.field_mappings', newMappings);
+        setValue('_ui_field_mappings', newMappings);
+        updateFieldsFromMappings(newMappings);
     };
 
     const normalizationMethods = [
@@ -153,18 +179,108 @@ export default function DatabaseSection({ configType, missingFields = [] }: Data
 
                 {/* Tokenized File Configuration */}
                 {isTokenized && (
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">
-                            Tokenized File Path
-                        </label>
-                        <input
-                            type="text"
-                            {...register('database.tokenized_file')}
-                            placeholder="out/tokens_party_a.json"
-                            className={getInputClass('database.tokenized_file')}
-                        />
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                Tokenized File Path
+                            </label>
+                            <input
+                                type="text"
+                                {...register('database.filename')}
+                                placeholder="out/tokens_party_a.json"
+                                className={getInputClass('database.filename')}
+                            />
+                            <p className="mt-1 text-xs text-slate-600">
+                                Path to the tokenized data file (CSV or JSON format)
+                            </p>
+                        </div>
                     </div>
                 )}
+
+                {/* Encryption Configuration - Show for all database types */}
+                <div className="border-t pt-4">
+                    <h4 className="text-sm font-medium text-slate-700 mb-3">Encryption Configuration</h4>
+                    <p className="text-xs text-slate-600 mb-4">
+                        Configure encryption settings for tokenized data processing.
+                    </p>
+
+                    {/* Encryption Toggle */}
+                    <div className="mb-4">
+                        <label className="flex items-center space-x-3">
+                            <input
+                                type="checkbox"
+                                {...register('_ui_is_encrypted')}
+                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-sm font-medium text-slate-700">My data is encrypted</span>
+                        </label>
+                        <p className="text-xs text-slate-600 ml-6 mt-1">
+                            Check this if your data file was created with encryption enabled
+                        </p>
+                    </div>
+
+                    {/* Encryption Key Fields - Only shown when encrypted is checked */}
+                    {isEncrypted && (
+                        <div className="space-y-3 pl-4 border-l-2 border-blue-200">
+                            <p className="text-xs text-slate-600 mb-3">
+                                Provide either a hex key directly or a path to a key file to decrypt your data.
+                            </p>
+
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Encryption Key (Hex)
+                                </label>
+                                <input
+                                    type="text"
+                                    {...register('database.encryption_key')}
+                                    placeholder="64-character hex key (leave empty if using key file)"
+                                    className={getInputClass('database.encryption_key') + ' font-mono text-sm'}
+                                />
+                                <p className="mt-1 text-xs text-slate-600">
+                                    32-byte encryption key as a 64-character hex string
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Encryption Key File
+                                </label>
+                                <input
+                                    type="text"
+                                    {...register('database.encryption_key_file')}
+                                    placeholder="out/tokenized_data.key"
+                                    className={getInputClass('database.encryption_key_file')}
+                                />
+                                <p className="mt-1 text-xs text-slate-600">
+                                    Path to file containing the encryption key (alternative to direct key input)
+                                </p>
+                            </div>
+
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3">
+                                <div className="flex items-start space-x-2">
+                                    <div className="text-blue-600 font-medium text-xs">🔑</div>
+                                    <div className="text-xs text-blue-700">
+                                        <strong>Note:</strong> You only need to provide either the hex key OR the key file path, not both.
+                                        The system will automatically decrypt your data during processing.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Information when not encrypted */}
+                    {!isEncrypted && (
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                            <div className="flex items-start space-x-2">
+                                <div className="text-gray-600 font-medium text-xs">ℹ️</div>
+                                <div className="text-xs text-gray-700">
+                                    Your data will be processed as unencrypted. If your data was created with encryption,
+                                    please check the box above and provide the decryption key.
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
 
                 {/* PostgreSQL Configuration */}
                 {databaseType === 'postgres' && (

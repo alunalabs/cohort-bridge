@@ -13,26 +13,16 @@ export default function PostgresConfigPage() {
             password: '',
             dbname: 'cohort_database',
             table: 'users',
-            fields: ['id', 'first_name', 'last_name', 'date_of_birth', 'gender', 'zip_code', 'email'],
+            fields: ['id', 'name:first_name', 'name:last_name', 'date:date_of_birth', 'gender:gender', 'zip:zip_code', 'email'],
             random_bits_percent: 0.0,
-            normalization: [
-                'name:first_name',
-                'name:last_name',
-                'date:date_of_birth',
-                'gender:gender',
-                'zip:zip_code'
-            ],
         },
         peer: {
             host: 'localhost',
             port: 8081,
         },
         listen_port: 8080,
-        private_key: '',
+
         security: {
-            allowed_ips: ['127.0.0.1', '::1', '192.168.1.0/24'],
-            require_ip_check: true,
-            max_connections: 10,
             rate_limit_per_min: 5,
         },
         timeouts: {

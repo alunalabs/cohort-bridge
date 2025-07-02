@@ -200,9 +200,12 @@ export default function FlexibleConfigBuilder({
     }, []);
 
     const generateConfiguration = () => {
-        const data = methods.getValues();
+        const originalData = methods.getValues();
 
         try {
+            // Create a clean copy of the data to avoid modifying the original
+            const data = JSON.parse(JSON.stringify(originalData));
+
             // Clean up undefined values and filter based on enabled sections
             const enabledSectionIds = sections.filter(s => s.enabled).map(s => s.id);
 
@@ -213,8 +216,8 @@ export default function FlexibleConfigBuilder({
                 return;
             }
 
-            // Validate required fields
-            const validation = validateRequiredFields(data, enabledSectionIds);
+            // Validate required fields (use original data for validation)
+            const validation = validateRequiredFields(originalData, enabledSectionIds);
             if (validation.errors.length > 0) {
                 setValidationError(validation.errors.join('; '));
                 setMissingFields(validation.missing);
@@ -228,13 +231,59 @@ export default function FlexibleConfigBuilder({
 
             // Always include basic fields
             if (data.listen_port !== undefined) filteredData.listen_port = data.listen_port;
-            if (data.private_key !== undefined && data.private_key !== '') filteredData.private_key = data.private_key;
-            if (data.public_key !== undefined && data.public_key !== '') filteredData.public_key = data.public_key;
+
+
 
             // Include section data based on what's enabled
             enabledSectionIds.forEach(sectionId => {
                 if (data[sectionId] && Object.keys(data[sectionId]).length > 0) {
-                    filteredData[sectionId] = data[sectionId];
+                    const sectionData = { ...data[sectionId] };
+
+                    // Special handling for database section to filter out irrelevant fields
+                    if (sectionId === 'database') {
+                        // Check if encryption is enabled from original data (UI state)
+                        const isEncrypted = originalData._ui_is_encrypted;
+
+                        // Remove encryption fields if encryption is not enabled OR if both fields are empty
+                        if (!isEncrypted || (!sectionData.encryption_key && !sectionData.encryption_key_file)) {
+                            delete sectionData.encryption_key;
+                            delete sectionData.encryption_key_file;
+                        }
+
+                        // Filter fields based on database type
+                        const dbType = sectionData.type;
+                        if (dbType === 'csv') {
+                            // For CSV, only keep relevant fields
+                            const csvFields = ['type', 'filename', 'fields', 'random_bits_percent', 'is_tokenized'];
+                            if (isEncrypted) {
+                                csvFields.push('encryption_key', 'encryption_key_file');
+                            }
+                            Object.keys(sectionData).forEach(key => {
+                                if (!csvFields.includes(key)) {
+                                    delete sectionData[key];
+                                }
+                            });
+                        } else if (dbType === 'postgres') {
+                            // For PostgreSQL, remove CSV-specific fields and empty fields
+                            delete sectionData.filename;
+                            // Remove empty/null PostgreSQL fields
+                            if (!sectionData.host || sectionData.host === '') delete sectionData.host;
+                            if (!sectionData.port || sectionData.port === null) delete sectionData.port;
+                            if (!sectionData.user || sectionData.user === '') delete sectionData.user;
+                            if (!sectionData.password || sectionData.password === '') delete sectionData.password;
+                            if (!sectionData.dbname || sectionData.dbname === '') delete sectionData.dbname;
+                            if (!sectionData.table || sectionData.table === '') delete sectionData.table;
+                        }
+
+                        // Always remove empty/null fields
+                        Object.keys(sectionData).forEach(key => {
+                            if (sectionData[key] === null || sectionData[key] === '' || sectionData[key] === undefined) {
+                                delete sectionData[key];
+                            }
+                        });
+                    }
+
+                    filteredData[sectionId] = sectionData;
                 }
             });
 
@@ -489,8 +538,24 @@ export default function FlexibleConfigBuilder({
                         {/* Preview Section */}
                         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
-                                <h3 className="text-lg font-semibold text-slate-900">Configuration Preview</h3>
-                                <p className="text-sm text-slate-600 mt-1">Updates automatically as you type</p>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-slate-900">Configuration Preview</h3>
+                                        <p className="text-sm text-slate-600 mt-1">Updates automatically as you type</p>
+                                    </div>
+                                    <button
+                                        onClick={copyToClipboard}
+                                        disabled={!generatedYaml}
+                                        className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm transition-colors ${generatedYaml
+                                            ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200 border border-slate-300'
+                                            : 'text-slate-400 cursor-not-allowed border border-slate-200'
+                                            }`}
+                                        title="Copy configuration to clipboard"
+                                    >
+                                        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                                        <span>{copied ? 'Copied!' : 'Copy'}</span>
+                                    </button>
+                                </div>
                             </div>
                             <div className="p-6">
                                 {generatedYaml ? (

@@ -1,22 +1,25 @@
+# Configuration for tokenized (pre-processed) data
+# Use this when data has been pre-tokenized using the tokenize command
+
 database:
   type: csv
+  filename: out/tokenized_data.csv  # Path to tokenized data file
   is_tokenized: true
-  tokenized_file: out/tokens_party_a.json  # Path to tokenized data
-  # These fields are not used when is_tokenized is true:
-  # filename: data/patients_a.csv
-  # fields: ["first_name", "last_name", "date_of_birth", "ssn"]
-  random_bits_percent: 0.0
+  # Encryption will be inferred from presence of encryption_key or encryption_key_file
+  encryption_key_file: "out/tokenized_data.key"  # Key file for encrypted tokenized data
 
+# Network configuration for peer-to-peer matching
 peer:
-  host: localhost
+  host: 127.0.0.1
   port: 8081
 
-security:
-  allowed_ips: ["127.0.0.1", "::1", "192.168.1.0/24"]
-  require_ip_check: true
-  max_connections: 5
-  rate_limit_per_min: 3
+listen_port: 8082
 
+# Security configuration
+security:
+  rate_limit_per_min: 5
+
+# Timeout configuration
 timeouts:
   connection_timeout: 30s
   read_timeout: 60s
@@ -24,13 +27,18 @@ timeouts:
   idle_timeout: 300s
   handshake_timeout: 30s
 
+# Logging configuration
 logging:
-  level: info
-  file: logs/cohort_bridge.log
+  level: "info"
+  file: "logs/tokenized_matching.log"
   max_size: 100
   max_backups: 3
   max_age: 30
-  enable_audit: true
-  audit_file: logs/audit.log
 
-listen_port: 8080 
+# Matching parameters for tokenized data
+matching:
+  hamming_threshold: 20
+  jaccard_threshold: 0.7
+
+# Note: Tokenized data mode provides enhanced security by separating
+# the tokenization process from the matching process 
