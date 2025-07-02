@@ -52,7 +52,7 @@ type SecureWorkflowConfig struct {
 }
 
 // runUnifiedWorkflow implements the new unified peer-to-peer workflow
-func runUnifiedWorkflow(cfg *config.Config, force bool) {
+func runUnifiedWorkflow(cfg *config.Config, force, allowDuplicates bool) {
 	fmt.Println("🔄 Starting Unified PPRL Peer-to-Peer Workflow")
 	fmt.Println("==============================================")
 	fmt.Printf("Local Dataset: %s\n", cfg.Database.Filename)
@@ -136,7 +136,7 @@ func runUnifiedWorkflow(cfg *config.Config, force bool) {
 		party = 1
 	}
 
-	intersection, err := computeZeroKnowledgeIntersection(localTokens, peerTokens, cfg, party)
+	intersection, err := computeZeroKnowledgeIntersection(localTokens, peerTokens, cfg, party, allowDuplicates)
 	if err != nil {
 		log.Fatalf("❌ Intersection computation failed: %v", err)
 	}
@@ -355,15 +355,21 @@ func loadTokenizedData(filename string) (*TokenData, error) {
 }
 
 // computeZeroKnowledgeIntersection computes intersection using ONLY zero-knowledge protocols
-func computeZeroKnowledgeIntersection(localTokens, peerTokens *TokenData, cfg *config.Config, party int) (*IntersectionResult, error) {
+func computeZeroKnowledgeIntersection(localTokens, peerTokens *TokenData, cfg *config.Config, party int, allowDuplicates bool) (*IntersectionResult, error) {
 	fmt.Printf("   🔒 Using zero-knowledge protocols (Party %d)\n", party)
 	fmt.Printf("   🛡️  No information leaked beyond intersection\n")
 
-	return computeSecureIntersection(localTokens, peerTokens, cfg, party)
+	if allowDuplicates {
+		fmt.Printf("   🔗 Matching mode: 1:many (duplicates allowed)\n")
+	} else {
+		fmt.Printf("   🎯 Matching mode: 1:1 (unique matches only)\n")
+	}
+
+	return computeSecureIntersection(localTokens, peerTokens, cfg, party, allowDuplicates)
 }
 
 // computeSecureIntersection performs secure intersection computation
-func computeSecureIntersection(localTokens, peerTokens *TokenData, cfg *config.Config, party int) (*IntersectionResult, error) {
+func computeSecureIntersection(localTokens, peerTokens *TokenData, cfg *config.Config, party int, allowDuplicates bool) (*IntersectionResult, error) {
 	// Convert TokenData to PPRL Records for secure matching
 	localRecords, err := tokenDataToPPRLRecords(localTokens)
 	if err != nil {
@@ -375,9 +381,10 @@ func computeSecureIntersection(localTokens, peerTokens *TokenData, cfg *config.C
 		return nil, fmt.Errorf("failed to convert peer tokens: %v", err)
 	}
 
-	// Configure zero-knowledge fuzzy matcher (only party is configurable for security)
+	// Configure zero-knowledge fuzzy matcher with duplicate control
 	fuzzyConfig := &match.FuzzyMatchConfig{
-		Party: party,
+		Party:           party,
+		AllowDuplicates: allowDuplicates,
 	}
 
 	// Create zero-knowledge fuzzy matcher
@@ -830,10 +837,11 @@ func runPPRLCommand(args []string) {
 
 	fs := flag.NewFlagSet("pprl", flag.ExitOnError)
 	var (
-		configFile  = fs.String("config", "", "Configuration file")
-		interactive = fs.Bool("interactive", false, "Force interactive mode")
-		force       = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
-		help        = fs.Bool("help", false, "Show help message")
+		configFile      = fs.String("config", "", "Configuration file")
+		interactive     = fs.Bool("interactive", false, "Force interactive mode")
+		force           = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
+		allowDuplicates = fs.Bool("allow-duplicates", false, "Allow 1:many matching (default: 1:1 matching only)")
+		help            = fs.Bool("help", false, "Show help message")
 	)
 	fs.Parse(args)
 
@@ -862,6 +870,11 @@ func runPPRLCommand(args []string) {
 	// Show configuration summary
 	fmt.Println("📋 PPRL Configuration:")
 	fmt.Printf("  📁 Config File: %s\n", *configFile)
+	if *allowDuplicates {
+		fmt.Printf("  🔗 Matching Mode: 1:many (duplicates allowed)\n")
+	} else {
+		fmt.Printf("  🎯 Matching Mode: 1:1 (unique matches only)\n")
+	}
 	fmt.Println()
 
 	// Confirm before proceeding
@@ -909,7 +922,7 @@ func runPPRLCommand(args []string) {
 
 	// Run the PPRL workflow
 	fmt.Println("🚀 Starting PPRL workflow...\n")
-	runUnifiedWorkflow(cfg, *force)
+	runUnifiedWorkflow(cfg, *force, *allowDuplicates)
 }
 
 func showPPRLHelp() {
@@ -930,10 +943,11 @@ func showPPRLHelp() {
 	fmt.Println("  cohort-bridge pprl                       # Interactive mode")
 	fmt.Println()
 	fmt.Println("OPTIONS:")
-	fmt.Println("  -config string     Configuration file")
-	fmt.Println("  -interactive       Force interactive mode")
-	fmt.Println("  -force             Skip confirmation prompts")
-	fmt.Println("  -help              Show this help message")
+	fmt.Println("  -config string        Configuration file")
+	fmt.Println("  -interactive          Force interactive mode")
+	fmt.Println("  -force                Skip confirmation prompts")
+	fmt.Println("  -allow-duplicates     Allow 1:many matching (default: 1:1 matching only)")
+	fmt.Println("  -help                 Show this help message")
 	fmt.Println()
 	fmt.Println("EXAMPLES:")
 	fmt.Println("  # Interactive mode")
@@ -944,6 +958,9 @@ func showPPRLHelp() {
 	fmt.Println()
 	fmt.Println("  # Automatic mode (skip confirmations)")
 	fmt.Println("  cohort-bridge pprl -config config.yaml -force")
+	fmt.Println()
+	fmt.Println("  # Allow 1:many matching (multiple matches per record)")
+	fmt.Println("  cohort-bridge pprl -config config.yaml -allow-duplicates")
 	fmt.Println()
 	fmt.Println("CONFIGURATION REQUIREMENTS:")
 	fmt.Println("  - peer.host and peer.port (peer connection)")
