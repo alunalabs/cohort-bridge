@@ -23,10 +23,10 @@ import (
 )
 
 func runTokenizeCommand(args []string) {
-	fmt.Println("🔐 PPRL Tokenization Tool")
-	fmt.Println("=========================")
+	fmt.Println("PPRL Tokenization Tool")
+	fmt.Println("======================")
 	fmt.Println("Converts raw PHI data to privacy-preserving Bloom filter tokens")
-	fmt.Println("🔒 Files are encrypted by default for maximum security")
+	fmt.Println("Files are encrypted by default for maximum security")
 	fmt.Println()
 
 	fs := flag.NewFlagSet("tokenize", flag.ExitOnError)
@@ -59,8 +59,8 @@ func runTokenizeCommand(args []string) {
 
 	// If missing required parameters or interactive mode requested, go interactive
 	if (*inputFile == "" && !*useDatabase) || *outputFile == "" || *interactive {
-		fmt.Println("🎯 Interactive Tokenization Setup")
-		fmt.Println("Let's configure your tokenization parameters...")
+		fmt.Println("Interactive Tokenization Setup")
+		fmt.Println("Configure your tokenization parameters...")
 
 		// Load config to get field information
 		var defaultFields []string
@@ -76,8 +76,8 @@ func runTokenizeCommand(args []string) {
 		// Choose data source
 		if !*useDatabase {
 			sourceChoice := promptForChoice("Select data source:", []string{
-				"📁 File - Process data from a file",
-				"🗄️  Database - Use database connection from config",
+				"File - Process data from a file",
+				"Database - Use database connection from config",
 			})
 			*useDatabase = (sourceChoice == 1)
 		}
@@ -87,7 +87,7 @@ func runTokenizeCommand(args []string) {
 			var err error
 			*inputFile, err = selectDataFile("Select Input Data File", "data", []string{".csv", ".json", ".txt"})
 			if err != nil {
-				fmt.Printf("❌ Error selecting input file: %v\n", err)
+				fmt.Printf("Error selecting input file: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -100,11 +100,11 @@ func runTokenizeCommand(args []string) {
 
 		// Configure encryption settings
 		if !*noEncryption {
-			fmt.Println("\n🔐 Encryption Configuration:")
+			fmt.Println("\nEncryption Configuration:")
 			encryptChoice := promptForChoice("Encryption key source:", []string{
-				"🎲 Auto-generate new key (recommended)",
-				"🔑 Provide custom key (32-byte hex)",
-				"❌ Disable encryption (not recommended)",
+				"Auto-generate new key (recommended)",
+				"Provide custom key (32-byte hex)",
+				"Disable encryption (not recommended)",
 			})
 
 			switch encryptChoice {
@@ -113,14 +113,14 @@ func runTokenizeCommand(args []string) {
 			case 1:
 				customKey := promptForInput("Enter 32-byte hex encryption key", "")
 				if len(customKey) != 64 {
-					fmt.Println("⚠️  Invalid key length, auto-generating instead...")
+					fmt.Println("Invalid key length, auto-generating instead...")
 					*encryptionKey = ""
 				} else {
 					*encryptionKey = customKey
 				}
 			case 2:
 				*noEncryption = true
-				fmt.Println("⚠️  Encryption disabled - files will be stored in plaintext!")
+				fmt.Println("Encryption disabled - files will be stored in plaintext!")
 			}
 		}
 
@@ -128,9 +128,9 @@ func runTokenizeCommand(args []string) {
 		if !*useDatabase {
 			fmt.Println("\nSelect input format (default: Auto-detect):")
 			formatOptions := []string{
-				"🔧 Auto-detect from file extension",
-				"📄 CSV - Comma-separated values",
-				"📋 JSON - JavaScript Object Notation",
+				"Auto-detect from file extension",
+				"CSV - Comma-separated values",
+				"JSON - JavaScript Object Notation",
 			}
 
 			formatChoice := promptForChoice("", formatOptions)
@@ -156,8 +156,8 @@ func runTokenizeCommand(args []string) {
 
 		fmt.Printf("\nSelect output format (default: %s):\n", strings.ToUpper(defaultOutputFormat))
 		outFormatOptions := []string{
-			fmt.Sprintf("📄 CSV - Comma-separated values %s", ifDefault(defaultOutputFormat == "csv")),
-			fmt.Sprintf("📋 JSON - JavaScript Object Notation %s", ifDefault(defaultOutputFormat == "json")),
+			fmt.Sprintf("CSV - Comma-separated values %s", ifDefault(defaultOutputFormat == "csv")),
+			fmt.Sprintf("JSON - JavaScript Object Notation %s", ifDefault(defaultOutputFormat == "json")),
 		}
 
 		outFormatChoice := promptForChoice("", outFormatOptions)
@@ -172,7 +172,7 @@ func runTokenizeCommand(args []string) {
 		if val, err := strconv.Atoi(batchSizeStr); err == nil && val > 0 && val <= 100000 {
 			*batchSize = val
 		} else {
-			fmt.Println("⚠️  Invalid batch size, using default:", *batchSize)
+			fmt.Println("Invalid batch size, using default:", *batchSize)
 		}
 
 		// Configure MinHash seed
@@ -188,9 +188,9 @@ func runTokenizeCommand(args []string) {
 		if len(mainConfig.Database.Fields) > 0 {
 			// Parse fields to extract field names and normalization
 			defaultFields, normalizationConfig = parseFieldsWithNormalization(mainConfig.Database.Fields)
-			fmt.Printf("📋 Using field names from %s: %v\n", *mainConfigFile, defaultFields)
+			fmt.Printf("Using field names from %s: %v\n", *mainConfigFile, defaultFields)
 			if len(normalizationConfig) > 0 {
-				fmt.Printf("🔧 Using normalization config: %v\n", normalizationConfig)
+				fmt.Printf("Using normalization config: %v\n", normalizationConfig)
 			}
 		}
 	}

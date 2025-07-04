@@ -39,8 +39,8 @@ type MatchPair struct {
 }
 
 func runValidateCommand(args []string) {
-	fmt.Println("🔬 CohortBridge Validation Tool")
-	fmt.Println("===============================")
+	fmt.Println("CohortBridge Validation Tool")
+	fmt.Println("============================")
 	fmt.Println("End-to-end validation against ground truth")
 	fmt.Println()
 
@@ -50,7 +50,7 @@ func runValidateCommand(args []string) {
 		config2File      = fs.String("config2", "", "Configuration file for dataset 2 (Party B)")
 		groundTruthFile  = fs.String("ground-truth", "", "Ground truth file with expected matches")
 		outputFile       = fs.String("output", "", "Output CSV file for validation report")
-		matchThreshold   = fs.Uint("match-threshold", 20, "Hamming distance threshold for matches (default: 20)")
+		matchThreshold   = fs.Uint("match-threshold", 90, "Hamming distance threshold for matches (default: 90)")
 		jaccardThreshold = fs.Float64("jaccard-threshold", 0.5, "Minimum Jaccard similarity for matches (default: 0.5)")
 		force            = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
 		verbose          = fs.Bool("verbose", false, "Verbose output with detailed analysis")
@@ -66,15 +66,15 @@ func runValidateCommand(args []string) {
 
 	// If missing required parameters or interactive mode requested, go interactive
 	if (*config1File == "" || *config2File == "" || *groundTruthFile == "" || *outputFile == "") || *interactive {
-		fmt.Println("🎯 Interactive Validation Setup")
-		fmt.Println("Let's configure your validation parameters...")
+		fmt.Println("Interactive Validation Setup")
+		fmt.Println("Configure your validation parameters...")
 
 		// Get first configuration file
 		if *config1File == "" {
 			var err error
 			*config1File, err = selectConfigFile("Select Configuration File for Dataset 1 (Party A)")
 			if err != nil {
-				fmt.Printf("❌ Error selecting config1 file: %v\n", err)
+				fmt.Printf("Error selecting config1 file: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -84,7 +84,7 @@ func runValidateCommand(args []string) {
 			var err error
 			*config2File, err = selectConfigFile("Select Configuration File for Dataset 2 (Party B)")
 			if err != nil {
-				fmt.Printf("❌ Error selecting config2 file: %v\n", err)
+				fmt.Printf("Error selecting config2 file: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -94,7 +94,7 @@ func runValidateCommand(args []string) {
 			var err error
 			*groundTruthFile, err = selectGroundTruthFile()
 			if err != nil {
-				fmt.Printf("❌ Error selecting ground truth file: %v\n", err)
+				fmt.Printf("Error selecting ground truth file: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -106,14 +106,14 @@ func runValidateCommand(args []string) {
 		}
 
 		// Configure match threshold
-		fmt.Println("\n🎯 Matching Configuration")
+		fmt.Println("\nMatching Configuration")
 		fmt.Println("Configuring thresholds...")
 
 		thresholdChoice := promptForChoice("Select Hamming distance threshold:", []string{
-			"🎯 20 - Default (recommended for good matches)",
-			"🔥 10 - Very strict matching",
-			"⚖️  30 - More lenient matching",
-			"🔧 Custom - Enter custom value",
+			"20 - Default (recommended for good matches)",
+			"10 - Very strict matching",
+			"30 - More lenient matching",
+			"Custom - Enter custom value",
 		})
 
 		switch thresholdChoice {
@@ -124,21 +124,21 @@ func runValidateCommand(args []string) {
 		case 2:
 			*matchThreshold = 30
 		case 3:
-			customResult := promptForInput("Enter custom Hamming distance threshold (0-100)", "20")
+			customResult := promptForInput("Enter custom Hamming distance threshold (0-100)", "90")
 			if val, err := strconv.ParseUint(customResult, 10, 32); err == nil && val <= 100 {
 				*matchThreshold = uint(val)
 			} else {
-				fmt.Println("⚠️  Invalid threshold, using default: 20")
-				*matchThreshold = 20
+				fmt.Println("Invalid threshold, using default: 90")
+				*matchThreshold = 90
 			}
 		}
 
 		// Configure Jaccard threshold
 		jaccardChoice := promptForChoice("Select Jaccard similarity threshold:", []string{
-			"📊 0.5 - Default (balanced matching)",
-			"🔥 0.8 - High similarity required",
-			"⚖️  0.3 - More lenient similarity",
-			"🔧 Custom - Enter custom value",
+			"0.5 - Default (balanced matching)",
+			"0.8 - High similarity required",
+			"0.3 - More lenient similarity",
+			"Custom - Enter custom value",
 		})
 
 		switch jaccardChoice {
@@ -153,15 +153,15 @@ func runValidateCommand(args []string) {
 			if val, err := strconv.ParseFloat(customJaccardResult, 64); err == nil && val >= 0.0 && val <= 1.0 {
 				*jaccardThreshold = val
 			} else {
-				fmt.Println("⚠️  Invalid Jaccard threshold, using default: 0.5")
+				fmt.Println("Invalid Jaccard threshold, using default: 0.5")
 				*jaccardThreshold = 0.5
 			}
 		}
 
 		// Verbose mode
 		verboseChoice := promptForChoice("Enable verbose output?", []string{
-			"📊 Standard - Basic metrics and summary",
-			"🔍 Verbose - Detailed analysis and breakdown",
+			"Standard - Basic metrics and summary",
+			"Verbose - Detailed analysis and breakdown",
 		})
 		*verbose = (verboseChoice == 1)
 
@@ -174,17 +174,17 @@ func runValidateCommand(args []string) {
 	}
 
 	// Show configuration summary
-	fmt.Println("📋 Validation Configuration:")
-	fmt.Printf("  📁 Config 1 (Party A): %s\n", *config1File)
-	fmt.Printf("  📁 Config 2 (Party B): %s\n", *config2File)
-	fmt.Printf("  📊 Ground Truth: %s\n", *groundTruthFile)
-	fmt.Printf("  📝 Output Report: %s\n", *outputFile)
-	fmt.Printf("  🎯 Hamming Threshold: %d\n", *matchThreshold)
-	fmt.Printf("  📈 Jaccard Threshold: %.3f\n", *jaccardThreshold)
+	fmt.Println("Validation Configuration:")
+	fmt.Printf("  Config 1 (Party A): %s\n", *config1File)
+	fmt.Printf("  Config 2 (Party B): %s\n", *config2File)
+	fmt.Printf("  Ground Truth: %s\n", *groundTruthFile)
+	fmt.Printf("  Output Report: %s\n", *outputFile)
+	fmt.Printf("  Hamming Threshold: %d\n", *matchThreshold)
+	fmt.Printf("  Jaccard Threshold: %.3f\n", *jaccardThreshold)
 	if *verbose {
-		fmt.Println("  🔍 Mode: Verbose")
+		fmt.Println("  Mode: Verbose")
 	} else {
-		fmt.Println("  📊 Mode: Standard")
+		fmt.Println("  Mode: Standard")
 	}
 	fmt.Println()
 
@@ -193,9 +193,9 @@ func runValidateCommand(args []string) {
 		// Only show confirmation prompt if in interactive mode or missing required params
 		if *interactive || (*config1File == "" || *config2File == "" || *groundTruthFile == "") {
 			confirmChoice := promptForChoice("Ready to start validation?", []string{
-				"✅ Yes, start validation",
-				"⚙️  Change configuration",
-				"❌ Cancel",
+				"Yes, start validation",
+				"Change configuration",
+				"Cancel",
 			})
 
 			if confirmChoice == 2 {
@@ -609,7 +609,7 @@ func showValidateHelp() {
 	fmt.Println("  -config2 string       Configuration file for dataset 2 (Party B)")
 	fmt.Println("  -ground-truth string  Ground truth CSV file with expected matches")
 	fmt.Println("  -output string        Output CSV file for validation report")
-	fmt.Println("  -match-threshold      Hamming distance threshold for matches (default: 20)")
+	fmt.Println("  -match-threshold      Hamming distance threshold for matches (default: 90)")
 	fmt.Println("  -jaccard-threshold    Jaccard similarity threshold for matches (default: 0.5)")
 	fmt.Println("  -verbose              Verbose output with detailed analysis")
 	fmt.Println("  -interactive          Force interactive mode")

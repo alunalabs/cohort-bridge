@@ -45,7 +45,7 @@ export default function FlexibleConfigBuilder({
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const allSections: ConfigSection[] = [
-        { id: 'database', name: 'Database Configuration', component: DatabaseSection, enabled: defaultSections.includes('database') },
+        { id: 'database', name: 'Database Configuration', component: DatabaseSection, enabled: true }, // Always enabled
         { id: 'peer', name: 'Peer Configuration', component: PeerSection, enabled: defaultSections.includes('peer') },
         { id: 'security', name: 'Security Configuration', component: SecuritySection, enabled: defaultSections.includes('security') },
         { id: 'timeouts', name: 'Timeouts Configuration', component: TimeoutsSection, enabled: defaultSections.includes('timeouts') },
@@ -83,8 +83,7 @@ export default function FlexibleConfigBuilder({
                 const parsedConfig = JSON.parse(importedConfigData);
 
                 // Enable sections based on what's in the imported config
-                const sectionsToEnable: string[] = [];
-                if (parsedConfig.database) sectionsToEnable.push('database');
+                const sectionsToEnable: string[] = ['database']; // Database is always enabled
                 if (parsedConfig.peer) sectionsToEnable.push('peer');
                 if (parsedConfig.security) sectionsToEnable.push('security');
                 if (parsedConfig.timeouts) sectionsToEnable.push('timeouts');
@@ -94,7 +93,7 @@ export default function FlexibleConfigBuilder({
                 // Update sections state
                 setSections(prev => prev.map(section => ({
                     ...section,
-                    enabled: sectionsToEnable.includes(section.id)
+                    enabled: section.id === 'database' ? true : sectionsToEnable.includes(section.id)
                 })));
 
                 // Reset form with imported data
@@ -119,6 +118,13 @@ export default function FlexibleConfigBuilder({
     }, []); // Empty dependency array to run only on mount
 
     const toggleSection = (sectionId: string) => {
+        // Database configuration is always required and cannot be toggled
+        if (sectionId === 'database') {
+            setValidationError('Database configuration is required and cannot be disabled.');
+            setTimeout(() => setValidationError(''), 3000);
+            return;
+        }
+
         const hasEnabledSections = sections.some(s => s.enabled);
         const targetSection = sections.find(s => s.id === sectionId);
 
@@ -186,13 +192,14 @@ export default function FlexibleConfigBuilder({
 
             // Add more validation for other sections as needed
             if (sectionId === 'security' && data.security) {
-                if (data.security.tls_enabled && (!data.security.cert_file || data.security.cert_file.trim() === '')) {
-                    errors.push('Certificate file is required when TLS is enabled');
-                    missing.push('security.cert_file');
-                }
-                if (data.security.tls_enabled && (!data.security.key_file || data.security.key_file.trim() === '')) {
-                    errors.push('Key file is required when TLS is enabled');
-                    missing.push('security.key_file');
+                // No required fields for security section currently
+                // IP validation could be added here if needed
+            }
+
+            if (sectionId === 'logging' && data.logging) {
+                if (data.logging.enable_audit && (!data.logging.audit_file || data.logging.audit_file.trim() === '')) {
+                    errors.push('Audit file path is required when audit logging is enabled');
+                    missing.push('logging.audit_file');
                 }
             }
         });
@@ -277,6 +284,55 @@ export default function FlexibleConfigBuilder({
                         }
 
                         // Always remove empty/null fields
+                        Object.keys(sectionData).forEach(key => {
+                            if (sectionData[key] === null || sectionData[key] === '' || sectionData[key] === undefined) {
+                                delete sectionData[key];
+                            }
+                        });
+                    }
+
+                    // Special handling for security section
+                    if (sectionId === 'security') {
+                        // Remove allowed_ips if require_ip_check is false or undefined
+                        if (!sectionData.require_ip_check) {
+                            delete sectionData.allowed_ips;
+                        }
+                        // Clean up empty/null fields
+                        Object.keys(sectionData).forEach(key => {
+                            if (sectionData[key] === null || sectionData[key] === '' || sectionData[key] === undefined) {
+                                delete sectionData[key];
+                            }
+                        });
+                    }
+
+                    // Special handling for logging section
+                    if (sectionId === 'logging') {
+                        // Remove audit_file if enable_audit is false
+                        if (!sectionData.enable_audit) {
+                            delete sectionData.audit_file;
+                        }
+                        // Clean up empty/null/false fields
+                        Object.keys(sectionData).forEach(key => {
+                            if (sectionData[key] === null || sectionData[key] === '' || sectionData[key] === undefined) {
+                                delete sectionData[key];
+                            }
+                            // Remove false boolean fields except for important toggles
+                            if (sectionData[key] === false && !['enable_audit', 'enable_syslog', 'console_enabled', 'rotation_enabled'].includes(key)) {
+                                delete sectionData[key];
+                            }
+                        });
+                    }
+
+                    // Special handling for timeouts section
+                    if (sectionId === 'timeouts') {
+                        // Convert seconds to Go duration format for specific fields
+                        const durationFields = ['connection_timeout', 'read_timeout', 'write_timeout', 'idle_timeout', 'handshake_timeout'];
+                        durationFields.forEach(field => {
+                            if (sectionData[field] !== undefined && sectionData[field] !== null && sectionData[field] !== '') {
+                                sectionData[field] = `${sectionData[field]}s`;
+                            }
+                        });
+                        // Clean up empty/null fields
                         Object.keys(sectionData).forEach(key => {
                             if (sectionData[key] === null || sectionData[key] === '' || sectionData[key] === undefined) {
                                 delete sectionData[key];
@@ -454,6 +510,25 @@ export default function FlexibleConfigBuilder({
                 processedConfig._ui_is_encrypted = false;
             }
 
+            // Process security fields for UI compatibility
+            if (processedConfig.security?.allowed_ips) {
+                processedConfig._ui_allowed_ips = processedConfig.security.allowed_ips;
+            }
+
+            // Process timeouts - convert Go duration format back to seconds
+            if (processedConfig.timeouts) {
+                const durationFields = ['connection_timeout', 'read_timeout', 'write_timeout', 'idle_timeout', 'handshake_timeout'];
+                durationFields.forEach(field => {
+                    if (processedConfig.timeouts[field] && typeof processedConfig.timeouts[field] === 'string') {
+                        const value = processedConfig.timeouts[field];
+                        // Remove 's' suffix if present and convert to number
+                        if (value.endsWith('s')) {
+                            processedConfig.timeouts[field] = parseInt(value.slice(0, -1), 10);
+                        }
+                    }
+                });
+            }
+
             // Reset form with processed data
             methods.reset(processedConfig);
 
@@ -558,10 +633,18 @@ export default function FlexibleConfigBuilder({
                                 {sections.map((section) => (
                                     <div key={section.id}
                                         onClick={() => toggleSection(section.id)}
-                                        className="flex items-center justify-between p-3 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer transition-all duration-200">
-                                        <span className="text-sm font-medium text-slate-700">{section.name}</span>
-                                        <div className={`w-12 h-6 rounded-full transition-colors duration-200 ${section.enabled ? 'bg-blue-600' : 'bg-slate-300'
+                                        className={`flex items-center justify-between p-3 rounded-lg border transition-all duration-200 ${section.id === 'database'
+                                            ? 'border-blue-300 bg-blue-50 cursor-default'
+                                            : 'border-slate-200 hover:border-slate-300 cursor-pointer'
                                             }`}>
+                                        <div className="flex items-center space-x-2">
+                                            <span className="text-sm font-medium text-slate-700">{section.name}</span>
+                                            {section.id === 'database' && (
+                                                <span className="text-xs bg-blue-200 text-blue-700 px-2 py-0.5 rounded-full">Required</span>
+                                            )}
+                                        </div>
+                                        <div className={`w-12 h-6 rounded-full transition-colors duration-200 ${section.enabled ? 'bg-blue-600' : 'bg-slate-300'
+                                            } ${section.id === 'database' ? 'opacity-75' : ''}`}>
                                             <div className={`w-5 h-5 mt-0.5 bg-white rounded-full shadow-md transform transition-transform duration-200 ${section.enabled ? 'translate-x-6' : 'translate-x-0.5'
                                                 }`}></div>
                                         </div>

@@ -1,22 +1,22 @@
 # CohortBridge Config Builder
 
-A beautiful, user-friendly web interface for creating and customizing YAML configuration files for CohortBridge - a privacy-preserving record linkage system.
+A web interface for creating and customizing YAML configuration files for CohortBridge - a privacy-preserving record linkage system.
 
 ## Features
 
-- 🎨 **Beautiful UI** - Modern, sleek design with Tailwind CSS
-- ⚡ **Type Safety** - Built with TypeScript for reliability
-- 🔧 **Multiple Config Types** - Support for different configuration scenarios:
+- **Modern Interface** - Clean design with Tailwind CSS
+- **Type Safety** - Built with TypeScript for reliability
+- **Multiple Config Types** - Support for different configuration scenarios:
   - Basic Configuration - Simple record linkage setup
   - PostgreSQL Configuration - Database connectivity
   - Secure Configuration - Enhanced security and logging
   - Tokenized Configuration - Pre-tokenized data support
   - Network Configuration - Multi-party setups
 
-- 📱 **Responsive Design** - Works on desktop and mobile
-- 💾 **Export & Download** - Generate and download YAML files
-- 📋 **Copy to Clipboard** - Easy sharing of configurations
-- ✅ **Real-time Preview** - See your YAML output as you build
+- **Responsive Design** - Works on desktop and mobile
+- **Export & Download** - Generate and download YAML files
+- **Copy to Clipboard** - Share configurations easily
+- **Real-time Preview** - See your YAML output as you build
 
 ## Getting Started
 
@@ -58,12 +58,12 @@ Multi-party network setups with peer connectivity and matching parameters.
 ## Technology Stack
 
 - **Next.js 14** - React framework with App Router
-- **TypeScript** - Type safety and better developer experience
+- **TypeScript** - Type safety and developer experience
 - **Tailwind CSS** - Utility-first CSS framework
 - **React Hook Form** - Form state management
 - **Zod** - Schema validation
 - **js-yaml** - YAML parsing and generation
-- **Lucide React** - Beautiful icons
+- **Lucide React** - Icon library
 
 ## Usage
 

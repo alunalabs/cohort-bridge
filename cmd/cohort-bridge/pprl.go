@@ -53,15 +53,15 @@ type SecureWorkflowConfig struct {
 
 // runUnifiedWorkflow implements the new unified peer-to-peer workflow
 func runUnifiedWorkflow(cfg *config.Config, force, allowDuplicates bool) {
-	fmt.Println("🔄 Starting Unified PPRL Peer-to-Peer Workflow")
-	fmt.Println("==============================================")
+	fmt.Println("Starting Unified PPRL Peer-to-Peer Workflow")
+	fmt.Println("============================================")
 	fmt.Printf("Local Dataset: %s\n", cfg.Database.Filename)
 	fmt.Printf("Peer Address: %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
 	fmt.Printf("Listen Port: %d\n", cfg.ListenPort)
 
 	// Zero-knowledge protocols are ALWAYS enabled - no toggleable options
-	fmt.Printf("🔒 Zero-Knowledge Protocol: ALWAYS ENABLED\n")
-	fmt.Printf("🛡️  Absolute zero information leakage guaranteed\n")
+	fmt.Printf("Zero-Knowledge Protocol: ALWAYS ENABLED\n")
+	fmt.Printf("Absolute zero information leakage guaranteed\n")
 	fmt.Println()
 
 	// Create temp directory for this session
@@ -81,54 +81,54 @@ func runUnifiedWorkflow(cfg *config.Config, force, allowDuplicates bool) {
 	os.Chdir(tempDir)
 
 	// STEP 1: Read the config file (already done)
-	fmt.Println("📋 STEP 1: Configuration Loaded")
-	fmt.Printf("   ✓ Config file processed successfully\n")
-	fmt.Printf("   ✓ Hamming threshold: %d\n", cfg.Matching.HammingThreshold)
-	fmt.Printf("   ✓ Jaccard threshold: %.3f\n", cfg.Matching.JaccardThreshold)
+	fmt.Println("STEP 1: Configuration Loaded")
+	fmt.Printf("   Config file processed successfully\n")
+	fmt.Printf("   Hamming threshold: %d\n", cfg.Matching.HammingThreshold)
+	fmt.Printf("   Jaccard threshold: %.3f\n", cfg.Matching.JaccardThreshold)
 	fmt.Println()
 
 	// STEP 2: Tokenize the dataset if not already tokenized
-	fmt.Println("🔧 STEP 2: Dataset Tokenization")
+	fmt.Println("STEP 2: Dataset Tokenization")
 	tokenizedFile, err := performTokenizationStep(cfg)
 	if err != nil {
-		log.Fatalf("❌ Tokenization failed: %v", err)
+		log.Fatalf("Tokenization failed: %v", err)
 	}
-	fmt.Printf("   ✅ Tokenized data ready: %s\n", tokenizedFile)
+	fmt.Printf("   Tokenized data ready: %s\n", tokenizedFile)
 	fmt.Println()
 
 	// Confirmation
 	if !confirmStep("Ready to establish peer connection and exchange tokens?", force) {
-		fmt.Println("👋 Workflow cancelled by user")
+		fmt.Println("Workflow cancelled by user")
 		return
 	}
 
 	// STEP 3: Establish connection with peer
-	fmt.Println("📡 STEP 3: Establishing Peer Connection")
+	fmt.Println("STEP 3: Establishing Peer Connection")
 	conn, isServer, err := establishPeerConnection(cfg)
 	if err != nil {
-		log.Fatalf("❌ Failed to establish peer connection: %v", err)
+		log.Fatalf("Failed to establish peer connection: %v", err)
 	}
 	defer conn.Close()
 
 	if isServer {
-		fmt.Printf("   ✅ Connected as server (listening on port %d)\n", cfg.ListenPort)
+		fmt.Printf("   Connected as server (listening on port %d)\n", cfg.ListenPort)
 	} else {
-		fmt.Printf("   ✅ Connected as client to %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
+		fmt.Printf("   Connected as client to %s:%d\n", cfg.Peer.Host, cfg.Peer.Port)
 	}
 	fmt.Println()
 
 	// STEP 4: Exchange tokens with peer
-	fmt.Println("🔄 STEP 4: Token Exchange")
+	fmt.Println("STEP 4: Token Exchange")
 	localTokens, peerTokens, err := exchangeTokens(conn, tokenizedFile, isServer)
 	if err != nil {
-		log.Fatalf("❌ Token exchange failed: %v", err)
+		log.Fatalf("Token exchange failed: %v", err)
 	}
-	fmt.Printf("   ✅ Local tokens: %d records\n", len(localTokens.Records))
-	fmt.Printf("   ✅ Peer tokens: %d records\n", len(peerTokens.Records))
+	fmt.Printf("   Local tokens: %d records\n", len(localTokens.Records))
+	fmt.Printf("   Peer tokens: %d records\n", len(peerTokens.Records))
 	fmt.Println()
 
 	// STEP 5: Compute intersection using thresholds from config
-	fmt.Println("🔍 STEP 5: Computing Intersection")
+	fmt.Println("STEP 5: Computing Intersection")
 
 	// Determine party number based on connection role
 	party := 0
@@ -138,78 +138,78 @@ func runUnifiedWorkflow(cfg *config.Config, force, allowDuplicates bool) {
 
 	intersection, err := computeZeroKnowledgeIntersection(localTokens, peerTokens, cfg, party, allowDuplicates)
 	if err != nil {
-		log.Fatalf("❌ Intersection computation failed: %v", err)
+		log.Fatalf("Intersection computation failed: %v", err)
 	}
 
-	fmt.Printf("   ✅ Found %d matches using zero-knowledge protocols\n", len(intersection.Matches))
-	fmt.Printf("   🔒 Zero information leaked beyond intersection result\n")
+	fmt.Printf("   Found %d matches using zero-knowledge protocols\n", len(intersection.Matches))
+	fmt.Printf("   Zero information leaked beyond intersection result\n")
 
 	// Save local intersection
 	localIntersectionFile := "local_intersection.json"
 	if err := saveWorkflowIntersectionResults(intersection, localIntersectionFile); err != nil {
-		log.Fatalf("❌ Failed to save local intersection: %v", err)
+		log.Fatalf("Failed to save local intersection: %v", err)
 	}
-	fmt.Printf("   ✅ Local intersection saved: %s\n", localIntersectionFile)
+	fmt.Printf("   Local intersection saved: %s\n", localIntersectionFile)
 	fmt.Println()
 
 	// STEP 6: Exchange intersection results for comparison
-	fmt.Println("🔄 STEP 6: Exchanging Intersection Results")
+	fmt.Println("STEP 6: Exchanging Intersection Results")
 	peerIntersection, err := exchangeIntersectionResults(conn, intersection, isServer)
 	if err != nil {
-		log.Fatalf("❌ Intersection exchange failed: %v", err)
+		log.Fatalf("Intersection exchange failed: %v", err)
 	}
-	fmt.Printf("   ✅ Received peer intersection (%d matches)\n", len(peerIntersection.Matches))
+	fmt.Printf("   Received peer intersection (%d matches)\n", len(peerIntersection.Matches))
 	fmt.Println()
 
 	// STEP 7: Compare results and create diff if needed
-	fmt.Println("⚖️  STEP 7: Comparing Intersection Results")
+	fmt.Println("STEP 7: Comparing Intersection Results")
 	resultsMatch, diffFile, err := compareIntersectionResults(intersection, peerIntersection)
 	if err != nil {
-		log.Fatalf("❌ Result comparison failed: %v", err)
+		log.Fatalf("Result comparison failed: %v", err)
 	}
 
 	if resultsMatch {
-		fmt.Println("   ✅ SUCCESS: Intersection results match between peers!")
-		fmt.Println("   🎉 Both peers computed identical intersections")
+		fmt.Println("   SUCCESS: Intersection results match between peers!")
+		fmt.Println("   Both peers computed identical intersections")
 
 		// Copy results to output directory
 		if err := copyToOutput(localIntersectionFile, "intersection_results.json"); err != nil {
-			fmt.Printf("   ⚠️  Warning: Failed to copy results to output: %v\n", err)
+			fmt.Printf("   Warning: Failed to copy results to output: %v\n", err)
 		} else {
-			fmt.Printf("   📁 Results saved to: out/intersection_results.json\n")
+			fmt.Printf("   Results saved to: out/intersection_results.json\n")
 		}
 	} else {
-		fmt.Println("   ❌ ERROR: Intersection results DO NOT match between peers!")
-		fmt.Printf("   📋 Diff file created: %s\n", diffFile)
+		fmt.Println("   ERROR: Intersection results DO NOT match between peers!")
+		fmt.Printf("   Diff file created: %s\n", diffFile)
 
 		// Copy diff to output directory
 		if err := copyToOutput(diffFile, "intersection_diff.json"); err != nil {
-			fmt.Printf("   ⚠️  Warning: Failed to copy diff to output: %v\n", err)
+			fmt.Printf("   Warning: Failed to copy diff to output: %v\n", err)
 		} else {
-			fmt.Printf("   📁 Diff saved to: out/intersection_diff.json\n")
+			fmt.Printf("   Diff saved to: out/intersection_diff.json\n")
 		}
 
-		log.Fatalf("❌ Workflow failed: Intersection results do not match")
+		log.Fatalf("Workflow failed: Intersection results do not match")
 	}
 
 	fmt.Println()
-	fmt.Println("🎉 UNIFIED PPRL WORKFLOW COMPLETED SUCCESSFULLY!")
-	fmt.Println("==============================================")
-	fmt.Printf("📁 Results available in: out/\n")
+	fmt.Println("UNIFIED PPRL WORKFLOW COMPLETED SUCCESSFULLY!")
+	fmt.Println("============================================")
+	fmt.Printf("Results available in: out/\n")
 	if isDebugMode() {
-		fmt.Printf("🐛 Debug files preserved in: %s/\n", tempDir)
+		fmt.Printf("Debug files preserved in: %s/\n", tempDir)
 	}
 }
 
 // performTokenizationStep handles tokenization if needed
 func performTokenizationStep(cfg *config.Config) (string, error) {
 	if cfg.Database.IsTokenized {
-		fmt.Printf("   ✓ Using pre-tokenized data: %s\n", cfg.Database.Filename)
+		fmt.Printf("   Using pre-tokenized data: %s\n", cfg.Database.Filename)
 		return filepath.Join("..", cfg.Database.Filename), nil
 	}
 
-	fmt.Printf("   🔧 Tokenizing dataset: %s\n", cfg.Database.Filename)
-	fmt.Printf("   📋 Fields: %s\n", strings.Join(cfg.Database.Fields, ", "))
+	fmt.Printf("   Tokenizing dataset: %s\n", cfg.Database.Filename)
+	fmt.Printf("   Fields: %s\n", strings.Join(cfg.Database.Fields, ", "))
 
 	tokenizedFile := "tokenized_data.csv"
 
@@ -226,15 +226,15 @@ func performTokenizationStep(cfg *config.Config) (string, error) {
 func establishPeerConnection(cfg *config.Config) (net.Conn, bool, error) {
 	// First try to connect as client
 	address := fmt.Sprintf("%s:%d", cfg.Peer.Host, cfg.Peer.Port)
-	fmt.Printf("   🔄 Attempting to connect to peer at %s...\n", address)
+	fmt.Printf("   Attempting to connect to peer at %s...\n", address)
 
 	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
 	if err == nil {
-		fmt.Printf("   ✅ Connected as client to %s\n", address)
+		fmt.Printf("   Connected as client to %s\n", address)
 		return conn, false, nil
 	}
 
-	fmt.Printf("   ⚠️  Client connection failed, starting server mode...\n")
+	fmt.Printf("   Client connection failed, starting server mode...\n")
 
 	// If client connection fails, start as server
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.ListenPort))
@@ -243,7 +243,7 @@ func establishPeerConnection(cfg *config.Config) (net.Conn, bool, error) {
 	}
 	defer listener.Close()
 
-	fmt.Printf("   🔄 Listening for peer connection on port %d...\n", cfg.ListenPort)
+	fmt.Printf("   Listening for peer connection on port %d...\n", cfg.ListenPort)
 
 	// Accept one connection
 	conn, err = listener.Accept()
@@ -251,7 +251,7 @@ func establishPeerConnection(cfg *config.Config) (net.Conn, bool, error) {
 		return nil, false, fmt.Errorf("failed to accept connection: %v", err)
 	}
 
-	fmt.Printf("   ✅ Peer connected from %s\n", conn.RemoteAddr())
+	fmt.Printf("   Peer connected from %s\n", conn.RemoteAddr())
 	return conn, true, nil
 }
 
@@ -268,7 +268,7 @@ func exchangeTokens(conn net.Conn, tokenizedFile string, isServer bool) (*TokenD
 
 	if isServer {
 		// Server: first receive, then send
-		fmt.Printf("   🔄 Receiving tokens from peer...\n")
+		fmt.Printf("   Receiving tokens from peer...\n")
 		var peerMessage PeerMessage
 		if err := decoder.Decode(&peerMessage); err != nil {
 			return nil, nil, fmt.Errorf("failed to receive peer tokens: %v", err)
@@ -283,7 +283,7 @@ func exchangeTokens(conn net.Conn, tokenizedFile string, isServer bool) (*TokenD
 			return nil, nil, fmt.Errorf("failed to parse peer tokens: %v", err)
 		}
 
-		fmt.Printf("   📨 Sending local tokens to peer...\n")
+		fmt.Printf("   Sending local tokens to peer...\n")
 		if err := encoder.Encode(PeerMessage{Type: "tokens", Payload: localTokens}); err != nil {
 			return nil, nil, fmt.Errorf("failed to send local tokens: %v", err)
 		}
@@ -291,12 +291,12 @@ func exchangeTokens(conn net.Conn, tokenizedFile string, isServer bool) (*TokenD
 		return localTokens, peerTokens, nil
 	} else {
 		// Client: first send, then receive
-		fmt.Printf("   📨 Sending local tokens to peer...\n")
+		fmt.Printf("   Sending local tokens to peer...\n")
 		if err := encoder.Encode(PeerMessage{Type: "tokens", Payload: localTokens}); err != nil {
 			return nil, nil, fmt.Errorf("failed to send local tokens: %v", err)
 		}
 
-		fmt.Printf("   🔄 Receiving tokens from peer...\n")
+		fmt.Printf("   Receiving tokens from peer...\n")
 		var peerMessage PeerMessage
 		if err := decoder.Decode(&peerMessage); err != nil {
 			return nil, nil, fmt.Errorf("failed to receive peer tokens: %v", err)
@@ -356,13 +356,13 @@ func loadTokenizedData(filename string) (*TokenData, error) {
 
 // computeZeroKnowledgeIntersection computes intersection using ONLY zero-knowledge protocols
 func computeZeroKnowledgeIntersection(localTokens, peerTokens *TokenData, cfg *config.Config, party int, allowDuplicates bool) (*IntersectionResult, error) {
-	fmt.Printf("   🔒 Using zero-knowledge protocols (Party %d)\n", party)
-	fmt.Printf("   🛡️  No information leaked beyond intersection\n")
+	fmt.Printf("   Using zero-knowledge protocols (Party %d)\n", party)
+	fmt.Printf("   No information leaked beyond intersection\n")
 
 	if allowDuplicates {
-		fmt.Printf("   🔗 Matching mode: 1:many (duplicates allowed)\n")
+		fmt.Printf("   Matching mode: 1:many (duplicates allowed)\n")
 	} else {
-		fmt.Printf("   🎯 Matching mode: 1:1 (unique matches only)\n")
+		fmt.Printf("   Matching mode: 1:1 (unique matches only)\n")
 	}
 
 	return computeSecureIntersection(localTokens, peerTokens, cfg, party, allowDuplicates)
@@ -476,7 +476,7 @@ func exchangeIntersectionResults(conn net.Conn, localIntersection *IntersectionR
 
 	if isServer {
 		// Server: first receive, then send
-		fmt.Printf("   🔄 Receiving intersection from peer...\n")
+		fmt.Printf("   Receiving intersection from peer...\n")
 		var peerMessage PeerMessage
 		if err := decoder.Decode(&peerMessage); err != nil {
 			return nil, fmt.Errorf("failed to receive peer intersection: %v", err)
@@ -491,7 +491,7 @@ func exchangeIntersectionResults(conn net.Conn, localIntersection *IntersectionR
 			return nil, fmt.Errorf("failed to parse peer intersection: %v", err)
 		}
 
-		fmt.Printf("   📨 Sending local intersection to peer...\n")
+		fmt.Printf("   Sending local intersection to peer...\n")
 		if err := encoder.Encode(PeerMessage{Type: "intersection", Payload: localIntersection}); err != nil {
 			return nil, fmt.Errorf("failed to send local intersection: %v", err)
 		}
@@ -499,12 +499,12 @@ func exchangeIntersectionResults(conn net.Conn, localIntersection *IntersectionR
 		return peerIntersection, nil
 	} else {
 		// Client: first send, then receive
-		fmt.Printf("   📨 Sending local intersection to peer...\n")
+		fmt.Printf("   Sending local intersection to peer...\n")
 		if err := encoder.Encode(PeerMessage{Type: "intersection", Payload: localIntersection}); err != nil {
 			return nil, fmt.Errorf("failed to send local intersection: %v", err)
 		}
 
-		fmt.Printf("   🔄 Receiving intersection from peer...\n")
+		fmt.Printf("   Receiving intersection from peer...\n")
 		var peerMessage PeerMessage
 		if err := decoder.Decode(&peerMessage); err != nil {
 			return nil, fmt.Errorf("failed to receive peer intersection: %v", err)
@@ -530,7 +530,7 @@ func compareIntersectionResults(local, peer *IntersectionResult) (bool, string, 
 	peerCount := len(peer.Matches)
 
 	if localCount != peerCount {
-		fmt.Printf("   ❌ Match count differs: local=%d, peer=%d\n", localCount, peerCount)
+		fmt.Printf("   Match count differs: local=%d, peer=%d\n", localCount, peerCount)
 	}
 
 	// Create sorted match sets for comparison using ONLY IDs
@@ -801,13 +801,13 @@ func copyToOutput(srcFile, dstFile string) error {
 
 func confirmStep(message string, force bool) bool {
 	if force {
-		fmt.Printf("🚀 %s (auto-confirmed with force flag)\n", message)
+		fmt.Printf("%s (auto-confirmed with force flag)\n", message)
 		return true
 	}
 
 	options := []string{
-		"✅ Yes, continue",
-		"❌ Cancel PPRL",
+		"Yes, continue",
+		"Cancel PPRL",
 	}
 
 	choice := promptForChoice(message, options)
@@ -830,8 +830,8 @@ func isDebugMode() bool {
 
 // runPPRLCommand is the entry point for the pprl command
 func runPPRLCommand(args []string) {
-	fmt.Println("🔗 CohortBridge PPRL")
-	fmt.Println("===================")
+	fmt.Println("CohortBridge PPRL")
+	fmt.Println("=================")
 	fmt.Println("Peer-to-peer privacy-preserving record linkage")
 	fmt.Println()
 
@@ -852,14 +852,14 @@ func runPPRLCommand(args []string) {
 
 	// Interactive mode if missing config or requested
 	if *configFile == "" || *interactive {
-		fmt.Println("🎯 Interactive PPRL Setup")
-		fmt.Println("Let's configure your peer-to-peer record linkage...\n")
+		fmt.Println("Interactive PPRL Setup")
+		fmt.Println("Configure your peer-to-peer record linkage:\n")
 
 		if *configFile == "" {
 			var err error
 			*configFile, err = selectDataFile("Select Configuration File", "config", []string{".yaml"})
 			if err != nil {
-				fmt.Printf("❌ Error selecting config file: %v\n", err)
+				fmt.Printf("Error selecting config file: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -868,30 +868,30 @@ func runPPRLCommand(args []string) {
 	}
 
 	// Show configuration summary
-	fmt.Println("📋 PPRL Configuration:")
-	fmt.Printf("  📁 Config File: %s\n", *configFile)
+	fmt.Println("PPRL Configuration:")
+	fmt.Printf("  Config File: %s\n", *configFile)
 	if *allowDuplicates {
-		fmt.Printf("  🔗 Matching Mode: 1:many (duplicates allowed)\n")
+		fmt.Printf("  Matching Mode: 1:many (duplicates allowed)\n")
 	} else {
-		fmt.Printf("  🎯 Matching Mode: 1:1 (unique matches only)\n")
+		fmt.Printf("  Matching Mode: 1:1 (unique matches only)\n")
 	}
 	fmt.Println()
 
 	// Confirm before proceeding
 	if !*force {
 		confirmOptions := []string{
-			"✅ Yes, start PPRL",
-			"❌ Cancel",
+			"Yes, start PPRL",
+			"Cancel",
 		}
 
 		confirmChoice := promptForChoice("Ready to start peer-to-peer record linkage?", confirmOptions)
 
 		if confirmChoice == 1 {
-			fmt.Println("\n👋 PPRL cancelled. Goodbye!")
+			fmt.Println("\nPPRL cancelled. Goodbye!")
 			os.Exit(0)
 		}
 	} else {
-		fmt.Println("🚀 Starting PPRL automatically (force mode)...")
+		fmt.Println("Starting PPRL automatically (force mode)...")
 	}
 
 	// Load configuration
@@ -901,7 +901,7 @@ func runPPRLCommand(args []string) {
 	}
 
 	// Debug: Print loaded config details
-	fmt.Printf("🐛 Debug - Loaded config: Peer.Host='%s', Peer.Port=%d, ListenPort=%d\n", cfg.Peer.Host, cfg.Peer.Port, cfg.ListenPort)
+	fmt.Printf("Debug - Loaded config: Peer.Host='%s', Peer.Port=%d, ListenPort=%d\n", cfg.Peer.Host, cfg.Peer.Port, cfg.ListenPort)
 
 	// Validate config has required fields
 	if cfg.Peer.Host == "" || cfg.Peer.Port == 0 {
@@ -913,7 +913,7 @@ func runPPRLCommand(args []string) {
 	}
 
 	if cfg.Matching.HammingThreshold == 0 {
-		cfg.Matching.HammingThreshold = 20 // Default
+		cfg.Matching.HammingThreshold = 90 // Default
 	}
 
 	if cfg.Matching.JaccardThreshold == 0 {
@@ -921,22 +921,22 @@ func runPPRLCommand(args []string) {
 	}
 
 	// Run the PPRL workflow
-	fmt.Println("🚀 Starting PPRL workflow...\n")
+	fmt.Println("Starting PPRL workflow...\n")
 	runUnifiedWorkflow(cfg, *force, *allowDuplicates)
 }
 
 func showPPRLHelp() {
-	fmt.Println("🔗 CohortBridge PPRL")
-	fmt.Println("===================")
+	fmt.Println("CohortBridge PPRL")
+	fmt.Println("=================")
 	fmt.Println()
 	fmt.Println("PPRL STEPS:")
-	fmt.Println("  1. 📋 Read configuration file")
-	fmt.Println("  2. 🔧 Tokenize dataset (if not pre-tokenized)")
-	fmt.Println("  3. 📡 Establish peer connection")
-	fmt.Println("  4. 🔄 Exchange tokens with peer")
-	fmt.Println("  5. 🔍 Compute intersection using thresholds")
-	fmt.Println("  6. 🔄 Exchange intersection results")
-	fmt.Println("  7. ⚖️  Compare results and create diff if needed")
+	fmt.Println("  1. Read configuration file")
+	fmt.Println("  2. Tokenize dataset (if not pre-tokenized)")
+	fmt.Println("  3. Establish peer connection")
+	fmt.Println("  4. Exchange tokens with peer")
+	fmt.Println("  5. Compute intersection using thresholds")
+	fmt.Println("  6. Exchange intersection results")
+	fmt.Println("  7. Compare results and create diff if needed")
 	fmt.Println()
 	fmt.Println("USAGE:")
 	fmt.Println("  cohort-bridge pprl [OPTIONS]")
@@ -965,6 +965,6 @@ func showPPRLHelp() {
 	fmt.Println("CONFIGURATION REQUIREMENTS:")
 	fmt.Println("  - peer.host and peer.port (peer connection)")
 	fmt.Println("  - listen_port (local server port)")
-	fmt.Println("  - matching.hamming_threshold (default: 20)")
+	fmt.Println("  - matching.hamming_threshold (default: 90)")
 	fmt.Println("  - matching.jaccard_threshold (default: 0.5)")
 }

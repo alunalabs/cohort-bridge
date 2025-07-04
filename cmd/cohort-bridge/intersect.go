@@ -14,10 +14,10 @@ import (
 )
 
 func runIntersectCommand(args []string) {
-	fmt.Println("🔍 CohortBridge Zero-Knowledge Intersection")
-	fmt.Println("============================================")
-	fmt.Println("Find matches using zero-knowledge protocols with ABSOLUTE privacy")
-	fmt.Println("🛡️  No information leaked beyond intersection results")
+	fmt.Println("CohortBridge Zero-Knowledge Intersection")
+	fmt.Println("========================================")
+	fmt.Println("Find matches using zero-knowledge protocols with absolute privacy")
+	fmt.Println("No information leaked beyond intersection results")
 	fmt.Println()
 
 	fs := flag.NewFlagSet("intersect", flag.ExitOnError)
@@ -38,14 +38,14 @@ func runIntersectCommand(args []string) {
 
 	// Interactive mode if missing required parameters
 	if *dataset1 == "" || *dataset2 == "" || *interactive {
-		fmt.Println("🎯 Interactive Zero-Knowledge Intersection Setup")
-		fmt.Println("Let's configure your secure intersection parameters...\n")
+		fmt.Println("Interactive Zero-Knowledge Intersection Setup")
+		fmt.Println("Configure your secure intersection parameters:\n")
 
 		if *dataset1 == "" {
 			var err error
 			*dataset1, err = selectDataFile("Select First Tokenized Dataset", "tokenized", []string{".csv", ".json"})
 			if err != nil {
-				fmt.Printf("❌ Error selecting first dataset: %v\n", err)
+				fmt.Printf("Error selecting first dataset: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -54,7 +54,7 @@ func runIntersectCommand(args []string) {
 			var err error
 			*dataset2, err = selectDataFile("Select Second Tokenized Dataset", "tokenized", []string{".csv", ".json"})
 			if err != nil {
-				fmt.Printf("❌ Error selecting second dataset: %v\n", err)
+				fmt.Printf("Error selecting second dataset: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -65,39 +65,39 @@ func runIntersectCommand(args []string) {
 		}
 
 		// Only party number is configurable for security
-		fmt.Println("\n🔒 Zero-Knowledge Protocol Configuration")
+		fmt.Println("\nZero-Knowledge Protocol Configuration")
 		partyResult := promptForInput("Party number (0 or 1) for two-party protocol", strconv.Itoa(*party))
 		if val, err := strconv.Atoi(partyResult); err == nil && (val == 0 || val == 1) {
 			*party = val
 		} else {
-			fmt.Println("⚠️  Invalid party number, using default:", *party)
+			fmt.Println("Invalid party number, using default:", *party)
 		}
 		fmt.Println()
 	}
 
 	// Show configuration summary
-	fmt.Println("📋 Zero-Knowledge Intersection Configuration:")
-	fmt.Printf("  📁 Dataset 1: %s\n", *dataset1)
-	fmt.Printf("  📁 Dataset 2: %s\n", *dataset2)
-	fmt.Printf("  📊 Output: %s\n", *outputFile)
-	fmt.Printf("  🔒 Party: %d\n", *party)
-	fmt.Printf("  🛡️  Security: Zero-knowledge protocols (hardcoded thresholds)\n")
+	fmt.Println("Zero-Knowledge Intersection Configuration:")
+	fmt.Printf("  Dataset 1: %s\n", *dataset1)
+	fmt.Printf("  Dataset 2: %s\n", *dataset2)
+	fmt.Printf("  Output: %s\n", *outputFile)
+	fmt.Printf("  Party: %d\n", *party)
+	fmt.Printf("  Security: Zero-knowledge protocols (hardcoded thresholds)\n")
 	fmt.Println()
 
 	// Confirm before proceeding
 	confirmChoice := promptForChoice("Ready to start zero-knowledge intersection?", []string{
-		"✅ Yes, find intersections",
-		"⚙️  Change configuration",
-		"❌ Cancel",
+		"Yes, find intersections",
+		"Change configuration",
+		"Cancel",
 	})
 
 	if confirmChoice == 2 {
-		fmt.Println("\n👋 Intersection cancelled. Goodbye!")
+		fmt.Println("\nIntersection cancelled. Goodbye!")
 		os.Exit(0)
 	}
 
 	if confirmChoice == 1 {
-		fmt.Println("\n🔄 Restarting configuration...\n")
+		fmt.Println("\nRestarting configuration...\n")
 		newArgs := append([]string{"-interactive"}, args...)
 		runIntersectCommand(newArgs)
 		return
@@ -105,21 +105,21 @@ func runIntersectCommand(args []string) {
 
 	// Validate inputs
 	if err := validateIntersectInputs(*dataset1, *dataset2); err != nil {
-		fmt.Printf("❌ Validation error: %v\n", err)
+		fmt.Printf("Validation error: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Run zero-knowledge intersection
-	fmt.Println("🚀 Starting zero-knowledge intersection process...\n")
+	fmt.Println("Starting zero-knowledge intersection process...\n")
 
 	if err := performZeroKnowledgeIntersection(*dataset1, *dataset2, *outputFile, *party); err != nil {
-		fmt.Printf("❌ Zero-knowledge intersection failed: %v\n", err)
+		fmt.Printf("Zero-knowledge intersection failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n✅ Zero-knowledge intersection completed successfully!\n")
-	fmt.Printf("📁 Results saved to: %s\n", *outputFile)
-	fmt.Printf("🛡️  GUARANTEE: Zero information leaked beyond intersection\n")
+	fmt.Printf("\nZero-knowledge intersection completed successfully!\n")
+	fmt.Printf("Results saved to: %s\n", *outputFile)
+	fmt.Printf("GUARANTEE: Zero information leaked beyond intersection\n")
 }
 
 func generateZKIntersectOutputName(dataset1, dataset2 string) string {
@@ -144,20 +144,20 @@ func performZeroKnowledgeIntersection(dataset1, dataset2, outputFile string, par
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	fmt.Println("📂 Loading tokenized datasets...")
+	fmt.Println("Loading tokenized datasets...")
 
 	// Load tokenized datasets using server's secure loading (handles encrypted CSV files)
 	records1, err := server.LoadTokenizedRecords(dataset1, false, "", "")
 	if err != nil {
 		return fmt.Errorf("failed to load dataset1: %w", err)
 	}
-	fmt.Printf("   ✅ Loaded %d records from dataset1\n", len(records1))
+	fmt.Printf("   Loaded %d records from dataset1\n", len(records1))
 
 	records2, err := server.LoadTokenizedRecords(dataset2, false, "", "")
 	if err != nil {
 		return fmt.Errorf("failed to load dataset2: %w", err)
 	}
-	fmt.Printf("   ✅ Loaded %d records from dataset2\n", len(records2))
+	fmt.Printf("   Loaded %d records from dataset2\n", len(records2))
 
 	// Configure zero-knowledge fuzzy matcher (only party is configurable)
 	fuzzyConfig := &match.FuzzyMatchConfig{
@@ -167,8 +167,8 @@ func performZeroKnowledgeIntersection(dataset1, dataset2, outputFile string, par
 	// Create zero-knowledge fuzzy matcher
 	fuzzyMatcher := match.NewFuzzyMatcher(fuzzyConfig)
 
-	fmt.Println("🔒 Computing zero-knowledge intersection...")
-	fmt.Printf("   🛡️  Using hardcoded secure thresholds for maximum privacy\n")
+	fmt.Println("Computing zero-knowledge intersection...")
+	fmt.Printf("   Using hardcoded secure thresholds for maximum privacy\n")
 
 	// Perform zero-knowledge intersection
 	zkResult, err := fuzzyMatcher.ComputePrivateIntersection(records1, records2)
@@ -177,21 +177,21 @@ func performZeroKnowledgeIntersection(dataset1, dataset2, outputFile string, par
 	}
 
 	// Save results with ZERO information leakage
-	fmt.Println("💾 Saving zero-knowledge intersection results...")
+	fmt.Println("Saving zero-knowledge intersection results...")
 	if err := saveZeroKnowledgeResults(zkResult.MatchPairs, outputFile); err != nil {
 		return fmt.Errorf("failed to save results: %w", err)
 	}
 
-	fmt.Printf("📊 Results: %d matches found (ONLY information revealed)\n", len(zkResult.MatchPairs))
+	fmt.Printf("Results: %d matches found (ONLY information revealed)\n", len(zkResult.MatchPairs))
 	return nil
 }
 
 func showZKIntersectHelp() {
-	fmt.Println("🔍 CohortBridge Zero-Knowledge Intersection")
-	fmt.Println("============================================")
+	fmt.Println("CohortBridge Zero-Knowledge Intersection")
+	fmt.Println("========================================")
 	fmt.Println()
-	fmt.Println("Find matches using zero-knowledge protocols with ABSOLUTE privacy")
-	fmt.Println("🛡️  Guarantees ZERO information leakage beyond intersection")
+	fmt.Println("Find matches using zero-knowledge protocols with absolute privacy")
+	fmt.Println("Guarantees zero information leakage beyond intersection")
 	fmt.Println()
 	fmt.Println("USAGE:")
 	fmt.Println("  cohort-bridge intersect [OPTIONS]")

@@ -1,7 +1,7 @@
 'use client';
 
 import { useFormContext } from 'react-hook-form';
-import { FileText } from 'lucide-react';
+import { FileText, Shield, Monitor } from 'lucide-react';
 
 interface LoggingSectionProps {
     missingFields?: string[];
@@ -11,6 +11,7 @@ export default function LoggingSection({ missingFields = [] }: LoggingSectionPro
     const { register, setValue, watch } = useFormContext();
 
     const logLevel = watch('logging.level');
+    const enableAudit = watch('logging.enable_audit');
 
     const getInputClass = (fieldName: string) => {
         const baseClass = "w-full px-3 py-2 border rounded-lg focus:ring-2 text-slate-900 placeholder-slate-400 bg-white transition-colors";
@@ -33,7 +34,7 @@ export default function LoggingSection({ missingFields = [] }: LoggingSectionPro
                     <h3 className="text-lg font-semibold text-slate-900">Logging Configuration</h3>
                 </div>
                 <p className="text-sm text-slate-600 ml-11">
-                    Configure logging levels and output destinations for monitoring and debugging record linkage operations.
+                    Configure logging levels, file rotation, and audit trails for monitoring and compliance.
                 </p>
             </div>
 
@@ -72,38 +73,158 @@ export default function LoggingSection({ missingFields = [] }: LoggingSectionPro
                     </p>
                 </div>
 
-                {/* Log File Path */}
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Log File Path
-                    </label>
-                    <input
-                        type="text"
-                        {...register('logging.file_path')}
-                        placeholder="logs/cohort-bridge.log"
-                        className={getInputClass('logging.file_path')}
-                    />
-                    <p className="mt-1 text-xs text-slate-600">
-                        Path where log files will be written. Directory will be created if it doesn't exist.
-                    </p>
+                {/* Log File Configuration */}
+                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                    <div className="flex items-center space-x-2 mb-4">
+                        <FileText className="h-4 w-4 text-slate-600" />
+                        <h4 className="text-sm font-medium text-slate-700">File Logging</h4>
+                    </div>
+
+                    <div className="space-y-4">
+                        {/* Log File Path */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                Log File Path
+                            </label>
+                            <input
+                                type="text"
+                                {...register('logging.file_path')}
+                                placeholder="logs/cohort-bridge.log"
+                                className={getInputClass('logging.file_path')}
+                            />
+                            <p className="mt-1 text-xs text-slate-600">
+                                Path where log files will be written. Directory will be created if it doesn't exist.
+                            </p>
+                        </div>
+
+                        {/* File Rotation Settings */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Max File Size (MB)
+                                </label>
+                                <input
+                                    type="number"
+                                    {...register('logging.max_file_size_mb', { valueAsNumber: true })}
+                                    placeholder="100"
+                                    min="1"
+                                    max="1000"
+                                    className={getInputClass('logging.max_file_size_mb')}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Max Backup Files
+                                </label>
+                                <input
+                                    type="number"
+                                    {...register('logging.max_backup_files', { valueAsNumber: true })}
+                                    placeholder="3"
+                                    min="1"
+                                    max="50"
+                                    className={getInputClass('logging.max_backup_files')}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Max Age (days)
+                                </label>
+                                <input
+                                    type="number"
+                                    {...register('logging.max_age', { valueAsNumber: true })}
+                                    placeholder="30"
+                                    min="1"
+                                    max="365"
+                                    className={getInputClass('logging.max_age')}
+                                />
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                {/* Console Logging */}
-                <div>
-                    <label className="flex items-center space-x-3">
-                        <input
-                            type="checkbox"
-                            {...register('logging.console_enabled')}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-sm font-medium text-slate-700">Enable Console Logging</span>
-                    </label>
-                    <p className="mt-1 text-xs text-slate-600 ml-6">
-                        Output logs to console/terminal in addition to file. Useful for development and debugging.
-                    </p>
+                {/* Output Options */}
+                <div className="space-y-4">
+                    <h4 className="text-sm font-medium text-slate-700">Output Options</h4>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Console Logging */}
+                        <div className="border border-slate-200 rounded-lg p-3">
+                            <label className="flex items-center space-x-3">
+                                <input
+                                    type="checkbox"
+                                    {...register('logging.console_enabled')}
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <div className="flex items-center space-x-2">
+                                    <Monitor className="h-4 w-4 text-slate-600" />
+                                    <span className="text-sm font-medium text-slate-700">Console Logging</span>
+                                </div>
+                            </label>
+                            <p className="mt-1 text-xs text-slate-600 ml-6">
+                                Output logs to console/terminal in addition to file.
+                            </p>
+                        </div>
+
+                        {/* Syslog Output */}
+                        <div className="border border-slate-200 rounded-lg p-3">
+                            <label className="flex items-center space-x-3">
+                                <input
+                                    type="checkbox"
+                                    {...register('logging.enable_syslog')}
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <div className="flex items-center space-x-2">
+                                    <FileText className="h-4 w-4 text-slate-600" />
+                                    <span className="text-sm font-medium text-slate-700">System Log (Syslog)</span>
+                                </div>
+                            </label>
+                            <p className="mt-1 text-xs text-slate-600 ml-6">
+                                Send logs to system log service for centralized monitoring.
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
-                {/* Log Rotation */}
+                {/* Security Audit Logging */}
+                <div className="border border-amber-200 rounded-lg p-4 bg-amber-50">
+                    <div className="flex items-center space-x-2 mb-3">
+                        <Shield className="h-4 w-4 text-amber-600" />
+                        <h4 className="text-sm font-medium text-amber-900">Security Audit Logging</h4>
+                    </div>
+
+                    <div className="space-y-4">
+                        <label className="flex items-center space-x-3">
+                            <input
+                                type="checkbox"
+                                {...register('logging.enable_audit')}
+                                className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                            />
+                            <span className="text-sm font-medium text-amber-900">Enable Security Audit Logging</span>
+                        </label>
+                        <p className="text-xs text-amber-800 ml-6">
+                            Track security events, connection attempts, and authentication activities for compliance.
+                        </p>
+
+                        {enableAudit && (
+                            <div className="mt-3">
+                                <label className="block text-sm font-medium text-amber-900 mb-2">
+                                    Audit Log File Path
+                                </label>
+                                <input
+                                    type="text"
+                                    {...register('logging.audit_file')}
+                                    placeholder="logs/security_audit.log"
+                                    className="w-full px-3 py-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-amber-900 bg-amber-50"
+                                />
+                                <p className="mt-1 text-xs text-amber-700">
+                                    Separate file for security events. Required for compliance in regulated environments.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Log Rotation Toggle */}
                 <div>
                     <label className="flex items-center space-x-3">
                         <input
@@ -114,44 +235,19 @@ export default function LoggingSection({ missingFields = [] }: LoggingSectionPro
                         <span className="text-sm font-medium text-slate-700">Enable Log Rotation</span>
                     </label>
                     <p className="mt-1 text-xs text-slate-600 ml-6">
-                        Automatically rotate log files when they reach a certain size to prevent disk space issues.
+                        Automatically rotate log files when they reach maximum size to prevent disk space issues.
                     </p>
                 </div>
 
-                {/* Max File Size */}
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Max File Size (MB)
-                    </label>
-                    <input
-                        type="number"
-                        {...register('logging.max_file_size_mb', { valueAsNumber: true })}
-                        placeholder="100"
-                        min="1"
-                        max="1000"
-                        className={getInputClass('logging.max_file_size_mb')}
-                    />
-                    <p className="mt-1 text-xs text-slate-600">
-                        Maximum size of each log file before rotation. 50-200MB recommended.
-                    </p>
-                </div>
-
-                {/* Max Files */}
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Max Backup Files
-                    </label>
-                    <input
-                        type="number"
-                        {...register('logging.max_backup_files', { valueAsNumber: true })}
-                        placeholder="5"
-                        min="1"
-                        max="50"
-                        className={getInputClass('logging.max_backup_files')}
-                    />
-                    <p className="mt-1 text-xs text-slate-600">
-                        Number of rotated log files to keep. Older files are automatically deleted.
-                    </p>
+                {/* Logging Best Practices */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h4 className="text-sm font-medium text-blue-900 mb-2">Logging Best Practices</h4>
+                    <ul className="text-sm text-blue-800 space-y-1">
+                        <li>• Use <strong>info</strong> level for production, <strong>debug</strong> for development</li>
+                        <li>• Enable audit logging for healthcare and financial deployments</li>
+                        <li>• Set up log rotation to prevent disk space issues</li>
+                        <li>• Monitor log files for security events and performance issues</li>
+                    </ul>
                 </div>
             </div>
         </div>

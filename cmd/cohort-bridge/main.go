@@ -32,7 +32,7 @@ func main() {
 		case "-version", "--version", "version", "-v":
 			showVersion()
 		default:
-			fmt.Printf("❌ Unknown subcommand: %s\n\n", subcommand)
+			fmt.Printf("Unknown subcommand: %s\n\n", subcommand)
 			showMainHelp()
 			os.Exit(1)
 		}
@@ -45,20 +45,20 @@ func main() {
 
 func runInteractiveMode() {
 	// Print banner
-	fmt.Println("🤖 CohortBridge - PPRL Orchestrator")
-	fmt.Println("====================================")
+	fmt.Println("CohortBridge - PPRL Orchestrator")
+	fmt.Println("=================================")
 	fmt.Println("Privacy-Preserving Record Linkage System")
 	fmt.Println()
-	fmt.Println("🎯 Interactive Mode")
+	fmt.Println("Interactive Mode")
 
 	options := []string{
-		"🔐 Tokenize - Convert PHI data to privacy-preserving tokens",
-		"🔓 Decrypt - Decrypt encrypted tokenized files",
-		"🔍 Intersect - Find matches between tokenized datasets",
-		"🔬 Validate - Test results against ground truth",
-		"🔗 PPRL - Peer-to-peer privacy-preserving record linkage",
-		"❓ Help - Show detailed help information",
-		"🚪 Exit",
+		"Tokenize - Convert PHI data to privacy-preserving tokens",
+		"Decrypt - Decrypt encrypted tokenized files",
+		"Intersect - Find matches between tokenized datasets",
+		"Validate - Test results against ground truth",
+		"PPRL - Peer-to-peer privacy-preserving record linkage",
+		"Help - Show detailed help information",
+		"Exit",
 	}
 
 	choice := promptForChoice("Choose what you'd like to do:", options)
@@ -77,7 +77,7 @@ func runInteractiveMode() {
 	case 5: // Help
 		showMainHelp()
 	case 6: // Exit
-		fmt.Println("👋 Goodbye!")
+		fmt.Println("Goodbye!")
 		os.Exit(0)
 	}
 }
@@ -108,9 +108,9 @@ func promptForChoice(message string, options []string) int {
 		Size:  10, // Show up to 10 items at once
 		Templates: &promptui.SelectTemplates{
 			Label:    "{{ . }}",
-			Active:   "▶ {{ . | cyan }}",
+			Active:   "> {{ . | cyan }}",
 			Inactive: "  {{ . }}",
-			Selected: "✓ {{ . | green }}",
+			Selected: "Selected: {{ . | green }}",
 		},
 	}
 
@@ -124,8 +124,8 @@ func promptForChoice(message string, options []string) int {
 }
 
 func showMainHelp() {
-	fmt.Println("🤖 CohortBridge - Privacy-Preserving Record Linkage")
-	fmt.Println("====================================================")
+	fmt.Println("CohortBridge - Privacy-Preserving Record Linkage")
+	fmt.Println("================================================")
 	fmt.Println()
 	fmt.Println("USAGE:")
 	fmt.Println("  cohort-bridge                     # Interactive mode")
@@ -133,13 +133,13 @@ func showMainHelp() {
 	fmt.Println("  cohort-bridge -mode=<mode>        # Legacy mode")
 	fmt.Println()
 	fmt.Println("SUBCOMMANDS:")
-	fmt.Println("  tokenize    🔐 Convert PHI data to privacy-preserving tokens")
-	fmt.Println("  decrypt     🔓 Decrypt encrypted tokenized files")
-	fmt.Println("  intersect   🔍 Find matches between tokenized datasets")
-	fmt.Println("  send        📡 Network operations for secure communication")
-	fmt.Println("  validate    🔬 Test results against ground truth")
-	fmt.Println("  pprl        🔗 Peer-to-peer privacy-preserving record linkage")
-	fmt.Println("  workflows   ⚙️  Orchestrate complex PPRL operations")
+	fmt.Println("  tokenize    Convert PHI data to privacy-preserving tokens")
+	fmt.Println("  decrypt     Decrypt encrypted tokenized files")
+	fmt.Println("  intersect   Find matches between tokenized datasets")
+	fmt.Println("  send        Network operations for secure communication")
+	fmt.Println("  validate    Test results against ground truth")
+	fmt.Println("  pprl        Peer-to-peer privacy-preserving record linkage")
+	fmt.Println("  workflows   Orchestrate complex PPRL operations")
 	fmt.Println()
 	fmt.Println()
 	fmt.Println("GLOBAL OPTIONS:")
@@ -164,5 +164,5 @@ func showMainHelp() {
 }
 
 func showVersion() {
-	fmt.Println("🤖 CohortBridge v0.1.0")
+	fmt.Println("CohortBridge v0.1.0")
 }

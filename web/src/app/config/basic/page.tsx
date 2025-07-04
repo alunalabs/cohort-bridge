@@ -13,15 +13,15 @@ export default function BasicConfigPage() {
         },
         peer: {
             host: 'localhost',
-            port: 8081,
+            port: 8080,
         },
         listen_port: 8080,
         security: {
             rate_limit_per_min: 5,
         },
         matching: {
-            hamming_threshold: 20,
-            jaccard_threshold: 0.7,
+            hamming_threshold: 90,
+            jaccard_threshold: 0.5,
         },
     };
 
