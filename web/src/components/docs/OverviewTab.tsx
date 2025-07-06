@@ -45,17 +45,17 @@ export default function OverviewTab() {
 
     const installCommands = {
         windows: {
-            download: 'curl -L "https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-windows-amd64.exe" -o cohort-bridge.exe',
-            install: 'mkdir "%USERPROFILE%\\bin" 2>nul & move cohort-bridge.exe "%USERPROFILE%\\bin\\" & setx PATH "%PATH%;%USERPROFILE%\\bin"',
+            download: 'curl -L "https://github.com/alunalabs/cohort-bridge/releases/download/v0.1.0/cohort-bridge-windows-amd64.exe" -o cohort-bridge.exe',
+            install: `mkdir "%USERPROFILE%\\bin" >nul 2>&1 & move /Y cohort-bridge.exe "%USERPROFILE%\\bin\\" & setx PATH "%PATH%;%USERPROFILE%\\bin"`,
             verify: 'cohort-bridge --version'
         },
         macos: {
-            download: 'curl -L "https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-darwin-amd64" -o cohort-bridge',
+            download: 'curl -L "https://github.com/alunalabs/cohort-bridge/releases/download/v0.1.0/cohort-bridge-darwin-amd64" -o cohort-bridge',
             install: 'chmod +x cohort-bridge && sudo mv cohort-bridge /usr/local/bin/',
             verify: 'cohort-bridge --version'
         },
         linux: {
-            download: 'wget https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-linux-amd64',
+            download: 'wget https://github.com/alunalabs/cohort-bridge/releases/download/v0.1.0/cohort-bridge-linux-amd64',
             install: 'chmod +x cohort-bridge-linux-amd64 && sudo mv cohort-bridge-linux-amd64 /usr/local/bin/cohort-bridge',
             verify: 'cohort-bridge --version'
         }

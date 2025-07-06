@@ -20,7 +20,7 @@ import ExamplesTab from '@/components/docs/ExamplesTab';
 
 export default function DocsPage() {
     const router = useRouter();
-    const [activeTab, setActiveTab] = useState('configuration');
+    const [activeTab, setActiveTab] = useState('overview');
 
     const tabs = [
         { id: 'overview', name: 'Overview', icon: BookOpen },

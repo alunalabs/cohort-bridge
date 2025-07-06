@@ -19,10 +19,53 @@ A secure, HIPAA-compliant system for privacy-preserving record linkage that enab
 
 Download the latest release from our [GitHub Releases page](https://github.com/alunalabs/cohort-bridge/releases):
 
+Download the latest CohortBridge CLI for your platform:
+
+---
+
+### Windows
+
+```cmd
+:: Download
+curl -L "https://github.com/alunalabs/cohort-bridge/releases/download/v0.1.0/cohort-bridge-windows-amd64.exe" -o cohort-bridge.exe
+
+:: Install
+mkdir "%USERPROFILE%\bin" >nul 2>&1 & move /Y cohort-bridge.exe "%USERPROFILE%\bin\" & setx PATH "%PATH%;%USERPROFILE%\bin"
+
+:: Verify
+cohort-bridge --version
+```
+
+> **Note**: After installation, close and reopen your terminal for the `PATH` change to take effect.
+
+---
+
+### macOS
+
 ```bash
-# Download for your platform
-curl -L https://github.com/alunalabs/cohort-bridge/releases/latest/download/cohort-bridge-windows.zip -o cohort-bridge.zip
-unzip cohort-bridge.zip
+# Download
+curl -L "https://github.com/alunalabs/cohort-bridge/releases/download/v0.1.0/cohort-bridge-darwin-amd64" -o cohort-bridge
+
+# Install
+chmod +x cohort-bridge && sudo mv cohort-bridge /usr/local/bin/
+
+# Verify
+cohort-bridge --version
+```
+
+---
+
+### Linux
+
+```bash
+# Download
+wget https://github.com/alunalabs/cohort-bridge/releases/download/v0.1.0/cohort-bridge-linux-amd64
+
+# Install
+chmod +x cohort-bridge-linux-amd64 && sudo mv cohort-bridge-linux-amd64 /usr/local/bin/cohort-bridge
+
+# Verify
+cohort-bridge --version
 ```
 
 Or compile from source:
