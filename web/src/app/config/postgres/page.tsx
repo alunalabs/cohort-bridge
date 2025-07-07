@@ -21,24 +21,13 @@ export default function PostgresConfigPage() {
             port: 8080,
         },
         listen_port: 8080,
-
-        security: {
-            rate_limit_per_min: 5,
-        },
-        timeouts: {
-            connection_timeout: '30s',
-            read_timeout: '60s',
-            write_timeout: '60s',
-            idle_timeout: '300s',
-            handshake_timeout: '30s',
-        },
     };
 
     return (
         <FlexibleConfigBuilder
             title="PostgreSQL Configuration"
             description="Connect to PostgreSQL databases with enhanced security and data normalization"
-            defaultSections={['database', 'peer', 'security', 'timeouts']}
+            defaultSections={['database', 'peer']}
             defaultValues={defaultValues}
             icon={Database}
         />

@@ -1,0 +1,18 @@
+listen_port: 8080
+database:
+  type: postgres
+  host: localhost
+  port: 5432
+  user: cohort_user
+  dbname: cohort_database
+  table: users
+  fields:
+    - name:first_name
+    - name:last_name
+    - date:date_of_birth
+    - gender:gender
+    - zip:zip_code
+  random_bits_percent: 0
+peer:
+  host: localhost
+  port: 8080

@@ -1,0 +1,14 @@
+listen_port: 8080
+database:
+  type: csv
+  filename: data/patients.csv
+  fields:
+    - name:first_name
+    - name:last_name
+    - date:date_of_birth
+    - gender:gender
+    - zip:zip_code
+  random_bits_percent: 0
+peer:
+  host: localhost
+  port: 8080
