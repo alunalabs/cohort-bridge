@@ -101,7 +101,7 @@ func runValidateCommand(args []string) {
 
 		// Get output file with smart default
 		if *outputFile == "" {
-			defaultOutput := generateValidationOutputName(*config1File, *config2File)
+			defaultOutput := generateOutputName("validation", *config1File, *config2File)
 			*outputFile = promptForInput("Output CSV file for validation report", defaultOutput)
 		}
 
@@ -170,7 +170,7 @@ func runValidateCommand(args []string) {
 
 	// Default output file if not specified
 	if *outputFile == "" {
-		*outputFile = generateValidationOutputName(*config1File, *config2File)
+		*outputFile = generateOutputName("validation", *config1File, *config2File)
 	}
 
 	// Show configuration summary
@@ -199,239 +199,49 @@ func runValidateCommand(args []string) {
 			})
 
 			if confirmChoice == 2 {
-				fmt.Println("\n👋 Validation cancelled. Goodbye!")
+				fmt.Println("\nValidation cancelled. Goodbye!")
 				os.Exit(0)
 			}
 
 			if confirmChoice == 1 {
 				// Restart configuration
-				fmt.Println("\n🔄 Restarting configuration...")
+				fmt.Println("\nRestarting configuration...")
 				newArgs := append([]string{"-interactive"}, args...)
 				runValidateCommand(newArgs)
 				return
 			}
 		}
 	} else {
-		fmt.Println("🚀 Starting validation process automatically (force mode)...")
+		fmt.Println("Starting validation process automatically (force mode)...")
 	}
 
 	// Validate inputs before proceeding
 	if err := validateValidationInputs(*config1File, *config2File, *groundTruthFile); err != nil {
-		fmt.Printf("❌ Validation error: %v\n", err)
+		fmt.Printf("Validation error: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Run validation
-	fmt.Println("🚀 Starting validation process...")
+	fmt.Println("Starting validation process...")
 
 	if err := performValidation(*config1File, *config2File, *groundTruthFile, *outputFile, *matchThreshold, *jaccardThreshold, *verbose); err != nil {
-		fmt.Printf("❌ Validation failed: %v\n", err)
+		fmt.Printf("Validation failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n✅ Validation completed successfully!\n")
-	fmt.Printf("📁 Report saved to: %s\n", *outputFile)
+	fmt.Printf("\nValidation completed successfully!\n")
+	fmt.Printf("Report saved to: %s\n", *outputFile)
 }
 
-func selectConfigFile(label string) (string, error) {
-	// Find YAML config files in current directory
-	var configFiles []string
+// selectConfigFile function moved to utils.go
 
-	matches, _ := filepath.Glob("*.yaml")
-	for _, match := range matches {
-		if strings.Contains(strings.ToLower(match), "example") {
-			continue // Skip example files
-		}
-		configFiles = append(configFiles, match)
-	}
+// selectGroundTruthFile function moved to utils.go
 
-	if len(configFiles) == 0 {
-		// Manual input if no files found
-		return promptForInput(label+" (enter .yaml file path)", ""), nil
-	}
+// selectDataFile function moved to utils.go
 
-	// Add manual input option
-	configFiles = append(configFiles, "📝 Enter file path manually...")
+// getConfigDescription function moved to utils.go
 
-	// Create display options with file descriptions
-	var displayOptions []string
-	for _, file := range configFiles {
-		if file == "📝 Enter file path manually..." {
-			displayOptions = append(displayOptions, file)
-		} else {
-			description := getConfigDescription(file)
-			displayOptions = append(displayOptions, fmt.Sprintf("📄 %s - %s", file, description))
-		}
-	}
-
-	selectedIndex := promptForChoice(label, displayOptions)
-
-	selectedFile := configFiles[selectedIndex]
-	if selectedFile == "📝 Enter file path manually..." {
-		return promptForInput("Enter config file path (.yaml)", ""), nil
-	}
-
-	return selectedFile, nil
-}
-
-func selectGroundTruthFile() (string, error) {
-	// Look for ground truth CSV files specifically in data directory
-	var groundTruthFiles []string
-
-	dataDir := "data"
-	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
-		matches, _ := filepath.Glob(filepath.Join(dataDir, "*.csv"))
-		for _, match := range matches {
-			name := strings.ToLower(filepath.Base(match))
-			// Look for files that contain ground truth keywords
-			if strings.Contains(name, "expected") ||
-				strings.Contains(name, "truth") ||
-				strings.Contains(name, "match") {
-				groundTruthFiles = append(groundTruthFiles, match)
-			}
-		}
-	}
-
-	if len(groundTruthFiles) == 0 {
-		// Manual input if no files found
-		return promptForInput("Ground Truth CSV File (enter path, should be in data/ directory)", ""), nil
-	}
-
-	// Add manual input option
-	groundTruthFiles = append(groundTruthFiles, "📝 Enter file path manually...")
-
-	// Create display options with file info
-	var displayOptions []string
-	for _, file := range groundTruthFiles {
-		if file == "📝 Enter file path manually..." {
-			displayOptions = append(displayOptions, file)
-		} else {
-			info, _ := os.Stat(file)
-			size := info.Size()
-			sizeStr := fmt.Sprintf("%.1fKB", float64(size)/1024)
-			displayOptions = append(displayOptions, fmt.Sprintf("📊 %s (%s)", file, sizeStr))
-		}
-	}
-
-	selectedIndex := promptForChoice("Select Ground Truth File", displayOptions)
-
-	selectedFile := groundTruthFiles[selectedIndex]
-	if selectedFile == "📝 Enter file path manually..." {
-		return promptForInput("Enter ground truth file path (.csv)", ""), nil
-	}
-
-	return selectedFile, nil
-}
-
-func selectDataFile(label, context string, extensions []string) (string, error) {
-	// Find files in current directory and common data directories
-	searchDirs := []string{".", "data", "out", "results", "logs"}
-	var files []string
-
-	for _, dir := range searchDirs {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			continue
-		}
-
-		matches, _ := filepath.Glob(filepath.Join(dir, "*"))
-		for _, match := range matches {
-			if info, err := os.Stat(match); err == nil && !info.IsDir() {
-				// Check if file has relevant extension or contains context keywords
-				ext := strings.ToLower(filepath.Ext(match))
-				name := strings.ToLower(filepath.Base(match))
-
-				hasValidExt := false
-				for _, validExt := range extensions {
-					if ext == validExt {
-						hasValidExt = true
-						break
-					}
-				}
-
-				containsContext := strings.Contains(name, context) ||
-					strings.Contains(name, "truth") ||
-					strings.Contains(name, "result") ||
-					strings.Contains(name, "match") ||
-					strings.Contains(name, "validation") ||
-					strings.Contains(name, "tokenized") ||
-					strings.Contains(name, "data")
-
-				if hasValidExt || containsContext {
-					files = append(files, match)
-				}
-			}
-		}
-	}
-
-	if len(files) == 0 {
-		// No files found, ask for manual input
-		return promptForInput(label+" (enter file path)", ""), nil
-	}
-
-	// Add manual input option
-	files = append(files, "📝 Enter file path manually...")
-
-	// Create display options with file info
-	var displayOptions []string
-	for _, file := range files {
-		if file == "📝 Enter file path manually..." {
-			displayOptions = append(displayOptions, file)
-		} else {
-			info, _ := os.Stat(file)
-			size := info.Size()
-			sizeStr := fmt.Sprintf("%.1fKB", float64(size)/1024)
-			if size > 1024*1024 {
-				sizeStr = fmt.Sprintf("%.1fMB", float64(size)/(1024*1024))
-			}
-			displayOptions = append(displayOptions, fmt.Sprintf("📁 %s (%s)", file, sizeStr))
-		}
-	}
-
-	selectedIndex := promptForChoice(label, displayOptions)
-
-	selectedFile := files[selectedIndex]
-	if selectedFile == "📝 Enter file path manually..." {
-		return promptForInput("Enter file path", ""), nil
-	}
-
-	return selectedFile, nil
-}
-
-func getConfigDescription(filename string) string {
-	// Try to give meaningful descriptions based on filename patterns
-	lower := strings.ToLower(filename)
-
-	if strings.Contains(lower, "_a") || strings.Contains(lower, "party_a") {
-		return "Party A configuration"
-	}
-	if strings.Contains(lower, "_b") || strings.Contains(lower, "party_b") {
-		return "Party B configuration"
-	}
-	if strings.Contains(lower, "sender") {
-		return "Sender configuration"
-	}
-	if strings.Contains(lower, "receiver") {
-		return "Receiver configuration"
-	}
-	if strings.Contains(lower, "secure") {
-		return "Secure/encrypted configuration"
-	}
-	if strings.Contains(lower, "postgres") {
-		return "PostgreSQL database configuration"
-	}
-	if strings.Contains(lower, "tokenized") {
-		return "Tokenized data configuration"
-	}
-
-	return "Configuration file"
-}
-
-func generateValidationOutputName(config1, config2 string) string {
-	base1 := strings.TrimSuffix(filepath.Base(config1), filepath.Ext(config1))
-	base2 := strings.TrimSuffix(filepath.Base(config2), filepath.Ext(config2))
-
-	return filepath.Join("out", fmt.Sprintf("validation_%s_vs_%s.csv", base1, base2))
-}
+// generateValidationOutputName function replaced with shared generateOutputName in utils.go
 
 func validateValidationInputs(config1, config2, groundTruth string) error {
 	if _, err := os.Stat(config1); os.IsNotExist(err) {
@@ -455,9 +265,9 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	fmt.Println("🔧 Loading configurations...")
-	fmt.Printf("  📁 Config 1: %s\n", config1)
-	fmt.Printf("  📁 Config 2: %s\n", config2)
+	fmt.Println("Loading configurations...")
+	fmt.Printf("  Config 1: %s\n", config1)
+	fmt.Printf("  Config 2: %s\n", config2)
 
 	// Load configurations
 	cfg1, err := config.Load(config1)
@@ -470,8 +280,8 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		return fmt.Errorf("failed to load config2: %w", err)
 	}
 
-	fmt.Println("📊 Loading ground truth data...")
-	fmt.Printf("  📊 Ground truth: %s\n", groundTruth)
+	fmt.Println("Loading ground truth data...")
+	fmt.Printf("  Ground truth: %s\n", groundTruth)
 
 	// Load ground truth
 	groundTruthMap, err := loadGroundTruth(groundTruth)
@@ -479,10 +289,10 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		return fmt.Errorf("failed to load ground truth: %w", err)
 	}
 
-	fmt.Printf("✅ Loaded %d ground truth matches\n", len(groundTruthMap))
+	fmt.Printf("Loaded %d ground truth matches\n", len(groundTruthMap))
 
 	// Load datasets
-	fmt.Println("📂 Loading datasets...")
+	fmt.Println("Loading datasets...")
 	records1, err := loadDataset(cfg1, "Dataset 1")
 	if err != nil {
 		return fmt.Errorf("failed to load dataset 1: %w", err)
@@ -493,12 +303,12 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		return fmt.Errorf("failed to load dataset 2: %w", err)
 	}
 
-	fmt.Printf("✅ Dataset 1: %d records\n", len(records1))
-	fmt.Printf("✅ Dataset 2: %d records\n", len(records2))
+	fmt.Printf("Dataset 1: %d records\n", len(records1))
+	fmt.Printf("Dataset 2: %d records\n", len(records2))
 
-	fmt.Println("🔄 Running PPRL matching pipeline...")
-	fmt.Printf("  🎯 Using Hamming threshold: %d\n", matchThreshold)
-	fmt.Printf("  📈 Using Jaccard threshold: %.3f\n", jaccardThreshold)
+	fmt.Println("Running PPRL matching pipeline...")
+	fmt.Printf("  Using Hamming threshold: %d\n", matchThreshold)
+	fmt.Printf("  Using Jaccard threshold: %.3f\n", jaccardThreshold)
 
 	// Configure zero-knowledge matching pipeline
 	// All thresholds are now hardcoded for security - no configurable values
@@ -523,22 +333,22 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		return fmt.Errorf("failed to run matching pipeline: %w", err)
 	}
 
-	fmt.Printf("✅ Found %d matches from %d comparisons\n", len(matches), len(allComparisons))
+	fmt.Printf("Found %d matches from %d comparisons\n", len(matches), len(allComparisons))
 
 	if verbose {
-		fmt.Println("🔍 Performing detailed analysis...")
-		fmt.Println("   📈 Computing ROC curve...")
-		fmt.Println("   📊 Calculating confusion matrix...")
-		fmt.Println("   🎯 Analyzing error patterns...")
+		fmt.Println("Performing detailed analysis...")
+		fmt.Println("   Computing ROC curve...")
+		fmt.Println("   Calculating confusion matrix...")
+		fmt.Println("   Analyzing error patterns...")
 	}
 
-	fmt.Println("⚖️  Computing validation metrics...")
+	fmt.Println("Computing validation metrics...")
 
 	// Validate results against ground truth
 	validationResult := validateResults(matches, allComparisons, groundTruthMap)
 
 	// Display results
-	fmt.Println("\n📈 Validation Results:")
+	fmt.Println("\nValidation Results:")
 	fmt.Printf("   True Positives: %d\n", validationResult.TruePositives)
 	fmt.Printf("   False Positives: %d\n", validationResult.FalsePositives)
 	fmt.Printf("   False Negatives: %d\n", validationResult.FalseNegatives)
@@ -553,7 +363,7 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 
 		// Show some examples
 		if len(validationResult.MatchedPairs) > 0 {
-			fmt.Println("\n🎯 Sample True Positives:")
+			fmt.Println("\nSample True Positives:")
 			for i, pair := range validationResult.MatchedPairs {
 				if i >= 3 { // Show first 3
 					break
@@ -563,7 +373,7 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		}
 
 		if len(validationResult.FalseMatches) > 0 {
-			fmt.Println("\n❌ Sample False Positives:")
+			fmt.Println("\nSample False Positives:")
 			for i, pair := range validationResult.FalseMatches {
 				if i >= 3 { // Show first 3
 					break
@@ -573,7 +383,7 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		}
 
 		if len(validationResult.MissedMatches) > 0 {
-			fmt.Println("\n🔍 Sample Missed Matches:")
+			fmt.Println("\nSample Missed Matches:")
 			for i, missed := range validationResult.MissedMatches {
 				if i >= 3 { // Show first 3
 					break
@@ -583,20 +393,20 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		}
 	}
 
-	fmt.Println("\n💾 Saving validation report to CSV...")
+	fmt.Println("\nSaving validation report to CSV...")
 
 	// Save detailed validation report
 	if err := saveValidationReport(validationResult, outputFile, len(groundTruthMap), verbose); err != nil {
 		return fmt.Errorf("failed to save validation report: %w", err)
 	}
 
-	fmt.Printf("✅ Validation report saved to: %s\n", outputFile)
+	fmt.Printf("Validation report saved to: %s\n", outputFile)
 	return nil
 }
 
 func showValidateHelp() {
-	fmt.Println("🔬 CohortBridge Validation Tool")
-	fmt.Println("===============================")
+	fmt.Println("CohortBridge Validation Tool")
+	fmt.Println("============================")
 	fmt.Println()
 	fmt.Println("Validate PPRL results against ground truth data")
 	fmt.Println()
@@ -673,10 +483,10 @@ func loadGroundTruth(path string) (map[string]string, error) {
 			col2 == "patient2" || col2 == "patientid2" || col2 == "record_id2"
 
 		if !isHeader {
-			fmt.Printf("   ⚠️  Warning: First row doesn't look like typical CSV headers: [%s, %s]\n", records[0][0], records[0][1])
-			fmt.Printf("   📝 Treating it as header anyway. If this is wrong, please format your CSV with proper headers.\n")
+			fmt.Printf("   Warning: First row doesn't look like typical CSV headers: [%s, %s]\n", records[0][0], records[0][1])
+			fmt.Printf("   Treating it as header anyway. If this is wrong, please format your CSV with proper headers.\n")
 		} else {
-			fmt.Printf("   ✅ Detected CSV headers: [%s, %s]\n", records[0][0], records[0][1])
+			fmt.Printf("   Detected CSV headers: [%s, %s]\n", records[0][0], records[0][1])
 		}
 	}
 
@@ -697,19 +507,19 @@ func loadGroundTruth(path string) (map[string]string, error) {
 
 // loadDataset loads a dataset from configuration for zero-knowledge validation
 func loadDataset(cfg *config.Config, datasetName string) ([]*pprl.Record, error) {
-	fmt.Printf("   📊 Loading %s...\n", datasetName)
+	fmt.Printf("   Loading %s...\n", datasetName)
 
 	var records []*pprl.Record
 	var err error
 
 	if cfg.Database.IsTokenized {
-		fmt.Printf("   📁 Loading tokenized data from %s\n", cfg.Database.Filename)
+		fmt.Printf("   Loading tokenized data from %s\n", cfg.Database.Filename)
 		records, err = server.LoadTokenizedRecords(cfg.Database.Filename, cfg.IsEncrypted(), cfg.Database.EncryptionKey, cfg.Database.EncryptionKeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load tokenized records: %v", err)
 		}
 	} else {
-		fmt.Printf("   📁 Loading raw data from %s\n", cfg.Database.Filename)
+		fmt.Printf("   Loading raw data from %s\n", cfg.Database.Filename)
 		csvDB, err := db.NewCSVDatabase(cfg.Database.Filename)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load %s: %w", datasetName, err)
@@ -727,8 +537,8 @@ func loadDataset(cfg *config.Config, datasetName string) ([]*pprl.Record, error)
 // For validation purposes, we now use the zero-knowledge fuzzy matcher directly
 // This ensures validation uses the same secure protocols as production
 func runMatchingPipeline(records1, records2 []*pprl.Record, pipeline *match.Pipeline, hammingThreshold uint32, jaccardThreshold float64) ([]*match.PrivateMatchResult, []*match.PrivateMatchResult, error) {
-	fmt.Println("   🔄 Computing zero-knowledge matching for validation...")
-	fmt.Println("   ⚠️  Note: Using hardcoded security thresholds (no configurable parameters)")
+	fmt.Println("   Computing zero-knowledge matching for validation...")
+	fmt.Println("   Note: Using hardcoded security thresholds (no configurable parameters)")
 
 	// Use the zero-knowledge fuzzy matcher for validation
 	fuzzyMatcher := match.NewFuzzyMatcher(&match.FuzzyMatchConfig{
@@ -757,17 +567,17 @@ func runMatchingPipeline(records1, records2 []*pprl.Record, pipeline *match.Pipe
 			// Debug first few comparisons (limited information only)
 			if totalComparisons <= 3 {
 				isMatch := result != nil
-				fmt.Printf("   🔍 DEBUG: Comparison #%d: %s->%s, IsMatch=%v\n",
+				fmt.Printf("   DEBUG: Comparison #%d: %s->%s, IsMatch=%v\n",
 					totalComparisons, record1.ID, record2.ID, isMatch)
 			}
 		}
 	}
 
-	fmt.Printf("   ✅ Completed %d zero-knowledge comparisons, found %d matches\n", totalComparisons, len(matches))
+	fmt.Printf("   Completed %d zero-knowledge comparisons, found %d matches\n", totalComparisons, len(matches))
 
 	// Debug sample of matches found (IDs only)
 	if len(matches) > 0 {
-		fmt.Printf("   🔍 Sample matches found:\n")
+		fmt.Printf("   Sample matches found:\n")
 		for i, match := range matches {
 			if i >= 3 { // Show first 3
 				break

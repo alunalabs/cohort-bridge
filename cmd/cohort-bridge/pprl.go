@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -774,45 +773,11 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 	return nil
 }
 
-// copyToOutput copies a file to the output directory
-func copyToOutput(srcFile, dstFile string) error {
-	// Ensure output directory exists
-	if err := os.MkdirAll("../out", 0755); err != nil {
-		return err
-	}
-
-	src, err := os.Open(srcFile)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	dst, err := os.Create(filepath.Join("../out", dstFile))
-	if err != nil {
-		return err
-	}
-	defer dst.Close()
-
-	_, err = io.Copy(dst, src)
-	return err
-}
+// copyToOutput function moved to utils.go
 
 // Utility functions
 
-func confirmStep(message string, force bool) bool {
-	if force {
-		fmt.Printf("%s (auto-confirmed with force flag)\n", message)
-		return true
-	}
-
-	options := []string{
-		"Yes, continue",
-		"Cancel PPRL",
-	}
-
-	choice := promptForChoice(message, options)
-	return choice == 0
-}
+// confirmStep function moved to utils.go
 
 func isDebugMode() bool {
 	if os.Getenv("COHORT_DEBUG") == "1" || os.Getenv("COHORT_DEBUG") == "true" {

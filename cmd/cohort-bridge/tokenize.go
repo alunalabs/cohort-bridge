@@ -70,7 +70,7 @@ func runTokenizeCommand(args []string) {
 			}
 		}
 		if len(defaultFields) == 0 {
-			defaultFields = []string{"FIRST", "LAST", "BIRTHDATE", "ZIP"}
+			defaultFields = []string{"FIRST", "LAST", "BIRTHDATE", "GENDER", "ZIP"}
 		}
 
 		// Choose data source
@@ -94,7 +94,7 @@ func runTokenizeCommand(args []string) {
 
 		// Get output file
 		if *outputFile == "" {
-			defaultOutput := generateTokenizeOutputName(*inputFile, *useDatabase, !*noEncryption)
+			defaultOutput := generateOutputName("tokenized", *inputFile)
 			*outputFile = promptForInput("Output file for tokenized data", defaultOutput)
 		}
 
@@ -122,6 +122,11 @@ func runTokenizeCommand(args []string) {
 				*noEncryption = true
 				fmt.Println("Encryption disabled - files will be stored in plaintext!")
 			}
+		}
+
+		// Output .enc file if it's encrypted
+		if !*noEncryption {
+			*outputFile = *outputFile + ".enc"
 		}
 
 		// Select input format with Auto-detect as default
@@ -181,24 +186,37 @@ func runTokenizeCommand(args []string) {
 		fmt.Println()
 	}
 
-	// Try to load field names from main config file
+	// Try to load field names from main config file or CSV headers
 	var defaultFields []string
 	var normalizationConfig map[string]crypto.NormalizationMethod
-	if mainConfig, err := config.Load(*mainConfigFile); err == nil {
-		if len(mainConfig.Database.Fields) > 0 {
-			// Parse fields to extract field names and normalization
-			defaultFields, normalizationConfig = parseFieldsWithNormalization(mainConfig.Database.Fields)
-			fmt.Printf("Using field names from %s: %v\n", *mainConfigFile, defaultFields)
-			if len(normalizationConfig) > 0 {
-				fmt.Printf("Using normalization config: %v\n", normalizationConfig)
+
+	// If using CSV file input, read headers from CSV first
+	if !*useDatabase && *inputFormat == "csv" && *inputFile != "" {
+		csvFields, err := readCSVHeaders(*inputFile)
+		if err == nil && len(csvFields) > 0 {
+			defaultFields = csvFields
+			fmt.Printf("Using field names from CSV headers: %v\n", defaultFields)
+		}
+	}
+
+	// If no CSV headers found, try to load from config file
+	if len(defaultFields) == 0 {
+		if mainConfig, err := config.Load(*mainConfigFile); err == nil {
+			if len(mainConfig.Database.Fields) > 0 {
+				// Parse fields to extract field names and normalization
+				defaultFields, normalizationConfig = parseFieldsWithNormalization(mainConfig.Database.Fields)
+				fmt.Printf("Using field names from %s: %v\n", *mainConfigFile, defaultFields)
+				if len(normalizationConfig) > 0 {
+					fmt.Printf("Using normalization config: %v\n", normalizationConfig)
+				}
 			}
 		}
 	}
 
-	// Fallback to CSV headers if config doesn't have fields
+	// Fallback to defaults if no fields found
 	if len(defaultFields) == 0 {
-		defaultFields = []string{"FIRST", "LAST", "BIRTHDATE", "ZIP"}
-		fmt.Printf("⚠️  Could not load field names from %s, using defaults: %v\n", *mainConfigFile, defaultFields)
+		defaultFields = []string{"FIRST", "LAST", "BIRTHDATE", "GENDER", "ZIP"}
+		fmt.Printf("Could not load field names from config or CSV, using defaults: %v\n", defaultFields)
 	}
 
 	// Generate encryption key if needed
@@ -209,7 +227,7 @@ func runTokenizeCommand(args []string) {
 			// Auto-generate key
 			key := make([]byte, 32)
 			if _, err := rand.Read(key); err != nil {
-				fmt.Printf("❌ Failed to generate encryption key: %v\n", err)
+				fmt.Printf("ERROR: Failed to generate encryption key: %v\n", err)
 				os.Exit(1)
 			}
 			finalEncryptionKey = hex.EncodeToString(key)
@@ -217,103 +235,94 @@ func runTokenizeCommand(args []string) {
 		} else {
 			finalEncryptionKey = *encryptionKey
 		}
+
+		// Automatically add .enc extension if encryption is enabled and not already present
+		if !strings.HasSuffix(strings.ToLower(*outputFile), ".enc") {
+			*outputFile = *outputFile + ".enc"
+			// Update keyFile path if it was generated
+			if keyFile != "" {
+				keyFile = generateKeyFileName(*outputFile)
+			}
+		}
 	}
 
 	// Show configuration summary
-	fmt.Println("📋 Tokenization Configuration:")
+	fmt.Println("Tokenization Configuration:")
 	if *useDatabase {
-		fmt.Println("  📊 Data Source: Database (from config)")
+		fmt.Println("  Data Source: Database (from config)")
 	} else {
-		fmt.Printf("  📊 Input File: %s\n", *inputFile)
-		fmt.Printf("  📄 Input Format: %s\n", *inputFormat)
+		fmt.Printf("  Input File: %s\n", *inputFile)
+		fmt.Printf("  Input Format: %s\n", *inputFormat)
 	}
-	fmt.Printf("  📁 Output File: %s\n", *outputFile)
-	fmt.Printf("  📄 Output Format: %s\n", *outputFormat)
-	fmt.Printf("  🔢 Batch Size: %d\n", *batchSize)
-	fmt.Printf("  🏷️  Fields: %v\n", defaultFields)
-	fmt.Printf("  🔑 MinHash Seed: %s\n", *minHashSeed)
+	fmt.Printf("  Output File: %s\n", *outputFile)
+	fmt.Printf("  Output Format: %s\n", *outputFormat)
+	fmt.Printf("  Batch Size: %d\n", *batchSize)
+	fmt.Printf("  Fields: %v\n", defaultFields)
+	fmt.Printf("  MinHash Seed: %s\n", *minHashSeed)
 
 	if !*noEncryption {
-		fmt.Printf("  🔐 Encryption: AES-256-GCM ✅\n")
+		fmt.Printf("  Encryption: AES-256-GCM (enabled)\n")
 		if keyFile != "" {
-			fmt.Printf("  🗝️  Key Storage: %s\n", keyFile)
+			fmt.Printf("  Key Storage: %s\n", keyFile)
 		} else {
-			fmt.Printf("  🗝️  Key Source: Custom provided\n")
+			fmt.Printf("  Key Source: Custom provided\n")
 		}
 	} else {
-		fmt.Printf("  🔐 Encryption: Disabled ⚠️\n")
+		fmt.Printf("  Encryption: Disabled\n")
 	}
 	fmt.Println()
 
 	// Confirm before proceeding (unless force flag is set)
 	if !*force {
 		confirmChoice := promptForChoice("Ready to start tokenization?", []string{
-			"✅ Yes, start tokenization",
-			"⚙️  Change configuration",
-			"❌ Cancel",
+			"Yes, start tokenization",
+			"Change configuration",
+			"Cancel",
 		})
 
 		if confirmChoice == 2 {
-			fmt.Println("\n👋 Tokenization cancelled. Goodbye!")
+			fmt.Println("\nTokenization cancelled. Goodbye!")
 			os.Exit(0)
 		}
 
 		if confirmChoice == 1 {
 			// Restart configuration
-			fmt.Println("\n🔄 Restarting configuration...")
+			fmt.Println("\nRestarting configuration...")
 			newArgs := append([]string{"-interactive"}, args...)
 			runTokenizeCommand(newArgs)
 			return
 		}
 	} else {
-		fmt.Println("🚀 Starting tokenization process automatically (force mode)...")
+		fmt.Println("Starting tokenization process automatically (force mode)...")
 	}
 
 	// Validate inputs before proceeding
 	if err := validateTokenizeInputs(*inputFile, *useDatabase, *mainConfigFile); err != nil {
-		fmt.Printf("❌ Validation error: %v\n", err)
+		fmt.Printf("ERROR: Validation error: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Run tokenization
-	fmt.Println("🚀 Starting tokenization process...")
+	fmt.Println("Starting tokenization process...")
 
 	if err := performTokenization(*inputFile, *outputFile, *inputFormat, *outputFormat, *batchSize, *minHashSeed, *useDatabase, defaultFields, finalEncryptionKey, keyFile, *noEncryption, normalizationConfig); err != nil {
-		fmt.Printf("❌ Tokenization failed: %v\n", err)
+		fmt.Printf("ERROR: Tokenization failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n✅ Tokenization completed successfully!\n")
+	fmt.Printf("\nTokenization completed successfully!\n")
 	if !*noEncryption {
-		fmt.Printf("🔐 Encrypted data saved to: %s\n", *outputFile)
+		fmt.Printf("Encrypted data saved to: %s\n", *outputFile)
 		if keyFile != "" {
-			fmt.Printf("🗝️  Encryption key saved to: %s\n", keyFile)
-			fmt.Printf("⚠️  IMPORTANT: Save your encryption key securely! Without it, your data cannot be decrypted.\n")
+			fmt.Printf("Encryption key saved to: %s\n", keyFile)
+			fmt.Printf("IMPORTANT: Save your encryption key securely! Without it, your data cannot be decrypted.\n")
 		}
 	} else {
-		fmt.Printf("📁 Tokenized data saved to: %s\n", *outputFile)
+		fmt.Printf("Tokenized data saved to: %s\n", *outputFile)
 	}
 }
 
-func generateTokenizeOutputName(inputFile string, useDatabase bool, encrypted bool) string {
-	var baseName string
-
-	if useDatabase {
-		baseName = "out/tokenized_database_records"
-	} else if inputFile == "" {
-		baseName = "out/tokenized_data"
-	} else {
-		base := filepath.Base(inputFile)
-		ext := filepath.Ext(base)
-		name := strings.TrimSuffix(base, ext)
-		baseName = filepath.Join("out", name+"_tokenized")
-	}
-
-	if encrypted {
-		return baseName + ".csv.enc"
-	}
-	return baseName + ".csv"
-}
+// generateTokenizeOutputName function replaced with shared generateOutputName in utils.go
 
 func generateKeyFileName(outputFile string) string {
 	base := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
@@ -326,6 +335,32 @@ func detectInputFormat(inputFile string) string {
 		return "json"
 	}
 	return "csv" // Default fallback
+}
+
+// readCSVHeaders reads the first line of a CSV file and returns the column headers
+func readCSVHeaders(csvFile string) ([]string, error) {
+	file, err := os.Open(csvFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open CSV file: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	headers, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
+	}
+
+	// Clean up headers (trim whitespace and convert to uppercase)
+	var cleanHeaders []string
+	for _, header := range headers {
+		cleaned := strings.TrimSpace(strings.ToUpper(header))
+		if cleaned != "" {
+			cleanHeaders = append(cleanHeaders, cleaned)
+		}
+	}
+
+	return cleanHeaders, nil
 }
 
 func validateTokenizeInputs(inputFile string, useDatabase bool, configFile string) error {
@@ -350,7 +385,7 @@ func performTokenization(inputFile, outputFile, inputFormat, outputFormat string
 	}
 
 	// Load records from input file
-	fmt.Println("📂 Loading records from input file...")
+	fmt.Println("Loading records from input file...")
 
 	var allRecords []map[string]string
 
@@ -370,10 +405,10 @@ func performTokenization(inputFile, outputFile, inputFormat, outputFormat string
 		return fmt.Errorf("input format %s not yet implemented - please use CSV", inputFormat)
 	}
 
-	fmt.Printf("   📊 Loaded %d records\n", len(allRecords))
+	fmt.Printf("   Loaded %d records\n", len(allRecords))
 
 	// Create output file
-	fmt.Println("💾 Creating output file...")
+	fmt.Println("Creating output file...")
 
 	if outputFormat == "csv" {
 		return performCSVTokenization(allRecords, outputFile, fields, batchSize, minHashSeed, encryptionKey, keyFile, noEncryption, normalizationConfig)
@@ -420,10 +455,10 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 		NoiseLevel:   0.01, // 1% noise
 	}
 
-	fmt.Println("🔧 Processing records in batches...")
-	fmt.Printf("   🔧 Batch size: %d\n", batchSize)
-	fmt.Println("   🔧 Generating Bloom filters...")
-	fmt.Println("   🔧 Computing MinHash signatures...")
+	fmt.Println("Processing records in batches...")
+	fmt.Printf("   Batch size: %d\n", batchSize)
+	fmt.Println("   Generating Bloom filters...")
+	fmt.Println("   Computing MinHash signatures...")
 
 	processedCount := 0
 	totalRecords := len(allRecords)
@@ -435,7 +470,7 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 		}
 
 		batch := allRecords[i:end]
-		fmt.Printf("   📦 Processing batch %d/%d (%d records)\n",
+		fmt.Printf("   Processing batch %d/%d (%d records)\n",
 			(i/batchSize)+1,
 			(totalRecords+batchSize-1)/batchSize,
 			len(batch))
@@ -529,11 +564,11 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 	writer.Flush()
 	outputCSV.Close()
 
-	fmt.Printf("✅ Successfully tokenized %d records\n", processedCount)
+	fmt.Printf("Successfully tokenized %d records\n", processedCount)
 
 	// Handle encryption if enabled
 	if !noEncryption {
-		fmt.Println("🔐 Encrypting output file...")
+		fmt.Println("Encrypting output file...")
 
 		// Save encryption key to file if keyFile is specified
 		if keyFile != "" {
@@ -542,7 +577,7 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 				os.Remove(tempFile)
 				return fmt.Errorf("failed to save encryption key: %w", err)
 			}
-			fmt.Printf("   🗝️  Encryption key saved to: %s\n", keyFile)
+			fmt.Printf("   Encryption key saved to: %s\n", keyFile)
 		}
 
 		// Encrypt the file
@@ -554,10 +589,10 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 
 		// Secure cleanup of temporary file
 		if err := secureDeleteFile(tempFile); err != nil {
-			fmt.Printf("⚠️  Warning: failed to securely delete temporary file: %v\n", err)
+			fmt.Printf("Warning: failed to securely delete temporary file: %v\n", err)
 		}
 
-		fmt.Printf("   🔒 File encrypted successfully with AES-256-GCM\n")
+		fmt.Printf("   File encrypted successfully with AES-256-GCM\n")
 	}
 
 	return nil
@@ -651,11 +686,11 @@ func secureDeleteFile(filename string) error {
 }
 
 func showTokenizeHelp() {
-	fmt.Println("🔐 CohortBridge Tokenization")
+	fmt.Println("CohortBridge Tokenization")
 	fmt.Println("===========================")
 	fmt.Println()
 	fmt.Println("Convert raw PHI data to privacy-preserving Bloom filter tokens")
-	fmt.Println("🔒 Files are encrypted by default using AES-256-GCM")
+	fmt.Println("Files are encrypted by default using AES-256-GCM")
 	fmt.Println()
 	fmt.Println("USAGE:")
 	fmt.Println("  cohort-bridge tokenize [OPTIONS]")
@@ -709,12 +744,7 @@ func showTokenizeHelp() {
 }
 
 // Helper function for default indicators
-func ifDefault(isDefault bool) string {
-	if isDefault {
-		return "(default)"
-	}
-	return ""
-}
+// ifDefault function moved to utils.go
 
 // DecryptFile decrypts a file encrypted with encryptFile
 func DecryptFile(inputFile, outputFile, keyHex string) error {
@@ -793,7 +823,7 @@ func LoadKeyFromFile(keyFile string) (string, error) {
 }
 
 func runDecryptCommand(args []string) {
-	fmt.Println("🔓 File Decryption Tool")
+	fmt.Println("File Decryption Tool")
 	fmt.Println("=======================")
 	fmt.Println("Decrypt encrypted tokenized files")
 	fmt.Println()
@@ -817,7 +847,7 @@ func runDecryptCommand(args []string) {
 
 	// If missing required parameters or interactive mode requested, go interactive
 	if *inputFile == "" || (*keyFile == "" && *keyHex == "") || *outputFile == "" || *interactive {
-		fmt.Println("🎯 Interactive Decryption Setup")
+		fmt.Println("Interactive Decryption Setup")
 		fmt.Println("Let's configure your decryption parameters...")
 
 		// Get input file
@@ -825,7 +855,7 @@ func runDecryptCommand(args []string) {
 			var err error
 			*inputFile, err = selectDataFile("Select Encrypted File", "out", []string{".enc", ".encrypted"})
 			if err != nil {
-				fmt.Printf("❌ Error selecting input file: %v\n", err)
+				fmt.Printf("ERROR: Error selecting input file: %v\n", err)
 				os.Exit(1)
 			}
 		}
@@ -839,8 +869,8 @@ func runDecryptCommand(args []string) {
 		// Get encryption key
 		if *keyFile == "" && *keyHex == "" {
 			keyChoice := promptForChoice("How would you like to provide the encryption key?", []string{
-				"📁 Key file - Load from .key file",
-				"🔑 Manual entry - Enter hex key directly",
+				"Key file - Load from .key file",
+				"Manual entry - Enter hex key directly",
 			})
 
 			if keyChoice == 0 {
@@ -848,14 +878,14 @@ func runDecryptCommand(args []string) {
 				var err error
 				*keyFile, err = selectDataFile("Select Key File", "out", []string{".key"})
 				if err != nil {
-					fmt.Printf("❌ Error selecting key file: %v\n", err)
+					fmt.Printf("ERROR: Error selecting key file: %v\n", err)
 					os.Exit(1)
 				}
 			} else {
 				// Manual entry
 				*keyHex = promptForInput("Enter 64-character hex encryption key", "")
 				if len(*keyHex) != 64 {
-					fmt.Printf("❌ Invalid key length. Expected 64 characters, got %d\n", len(*keyHex))
+					fmt.Printf("ERROR: Invalid key length. Expected 64 characters, got %d\n", len(*keyHex))
 					os.Exit(1)
 				}
 			}
@@ -868,7 +898,7 @@ func runDecryptCommand(args []string) {
 		var err error
 		finalKeyHex, err = LoadKeyFromFile(*keyFile)
 		if err != nil {
-			fmt.Printf("❌ Failed to load key from file: %v\n", err)
+			fmt.Printf("ERROR: Failed to load key from file: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
@@ -877,62 +907,62 @@ func runDecryptCommand(args []string) {
 
 	// Validate key format
 	if len(finalKeyHex) != 64 {
-		fmt.Printf("❌ Invalid key format. Expected 64 hex characters, got %d\n", len(finalKeyHex))
+		fmt.Printf("ERROR: Invalid key format. Expected 64 hex characters, got %d\n", len(finalKeyHex))
 		os.Exit(1)
 	}
 
 	// Show configuration summary
-	fmt.Println("📋 Decryption Configuration:")
-	fmt.Printf("  🔐 Input File: %s\n", *inputFile)
-	fmt.Printf("  📁 Output File: %s\n", *outputFile)
+	fmt.Println("Decryption Configuration:")
+	fmt.Printf(" Input File: %s\n", *inputFile)
+	fmt.Printf(" Output File: %s\n", *outputFile)
 	if *keyFile != "" {
-		fmt.Printf("  🗝️  Key Source: File (%s)\n", *keyFile)
+		fmt.Printf("  Key Source: File (%s)\n", *keyFile)
 	} else {
-		fmt.Printf("  🗝️  Key Source: Manual entry\n")
+		fmt.Printf("  Key Source: Manual entry\n")
 	}
 	fmt.Println()
 
 	// Confirm before proceeding (unless force flag is set)
 	if !*force {
 		confirmChoice := promptForChoice("Ready to decrypt file?", []string{
-			"✅ Yes, decrypt now",
-			"⚙️  Change configuration",
-			"❌ Cancel",
+			"Yes, decrypt now",
+			"Change configuration",
+			"Cancel",
 		})
 
 		if confirmChoice == 2 {
-			fmt.Println("\n👋 Decryption cancelled. Goodbye!")
+			fmt.Println("\nDecryption cancelled. Goodbye!")
 			os.Exit(0)
 		}
 
 		if confirmChoice == 1 {
 			// Restart configuration
-			fmt.Println("\n🔄 Restarting configuration...\n")
+			fmt.Println("\nRestarting configuration...\n")
 			newArgs := append([]string{"-interactive"}, args...)
 			runDecryptCommand(newArgs)
 			return
 		}
 	} else {
-		fmt.Println("🚀 Starting decryption process automatically (force mode)...")
+		fmt.Println("Starting decryption process automatically (force mode)...")
 	}
 
 	// Validate input file exists
 	if _, err := os.Stat(*inputFile); os.IsNotExist(err) {
-		fmt.Printf("❌ Input file not found: %s\n", *inputFile)
+		fmt.Printf("Input file not found: %s\n", *inputFile)
 		os.Exit(1)
 	}
 
 	// Run decryption
-	fmt.Println("🔓 Decrypting file...")
+	fmt.Println("Decrypting file...")
 
 	if err := DecryptFile(*inputFile, *outputFile, finalKeyHex); err != nil {
-		fmt.Printf("❌ Decryption failed: %v\n", err)
+		fmt.Printf("ERROR: Decryption failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n✅ Decryption completed successfully!\n")
-	fmt.Printf("📁 Decrypted data saved to: %s\n", *outputFile)
-	fmt.Printf("🔍 You can now view the tokenized data in plaintext format\n")
+	fmt.Printf("\nDecryption completed successfully!\n")
+	fmt.Printf("Decrypted data saved to: %s\n", *outputFile)
+	fmt.Printf("You can now view the tokenized data in plaintext format\n")
 }
 
 func generateDecryptOutputName(inputFile string) string {
@@ -951,7 +981,7 @@ func generateDecryptOutputName(inputFile string) string {
 }
 
 func showDecryptHelp() {
-	fmt.Println("🔓 CohortBridge File Decryption")
+	fmt.Println("CohortBridge File Decryption")
 	fmt.Println("===============================")
 	fmt.Println()
 	fmt.Println("Decrypt files encrypted by the tokenize command")
@@ -992,7 +1022,7 @@ func showDecryptHelp() {
 
 // parseFieldsWithNormalization parses fields array that may contain normalization specs
 // Input: ["name:FIRST", "LAST", "date:BIRTHDATE", "ZIP"]
-// Output: (["FIRST", "LAST", "BIRTHDATE", "ZIP"], {"FIRST": "name", "BIRTHDATE": "date"})
+// Output: (["FIRST", "LAST", "BIRTHDATE", "GENDER", "ZIP"], {"FIRST": "name", "BIRTHDATE": "date"})
 func parseFieldsWithNormalization(fields []string) ([]string, map[string]crypto.NormalizationMethod) {
 	var fieldNames []string
 	normalizationConfig := make(map[string]crypto.NormalizationMethod)

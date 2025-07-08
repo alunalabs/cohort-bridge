@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/crypto"
 	"github.com/auroradata-ai/cohort-bridge/internal/match"
@@ -60,7 +59,7 @@ func runIntersectCommand(args []string) {
 		}
 
 		if *outputFile == "zk_intersection_results.csv" {
-			defaultOutput := generateZKIntersectOutputName(*dataset1, *dataset2)
+			defaultOutput := generateOutputName("zk_intersection", *dataset1, *dataset2)
 			*outputFile = promptForInput("Output file for intersection results", defaultOutput)
 		}
 
@@ -122,11 +121,7 @@ func runIntersectCommand(args []string) {
 	fmt.Printf("GUARANTEE: Zero information leaked beyond intersection\n")
 }
 
-func generateZKIntersectOutputName(dataset1, dataset2 string) string {
-	base1 := strings.TrimSuffix(filepath.Base(dataset1), filepath.Ext(dataset1))
-	base2 := strings.TrimSuffix(filepath.Base(dataset2), filepath.Ext(dataset2))
-	return filepath.Join("out", fmt.Sprintf("zk_intersection_%s_vs_%s.csv", base1, base2))
-}
+// generateZKIntersectOutputName function replaced with shared generateOutputName in utils.go
 
 func validateIntersectInputs(dataset1, dataset2 string) error {
 	if _, err := os.Stat(dataset1); os.IsNotExist(err) {
@@ -205,10 +200,10 @@ func showZKIntersectHelp() {
 	fmt.Println("  -help                  Show this help message")
 	fmt.Println()
 	fmt.Println("SECURITY GUARANTEES:")
-	fmt.Println("  🛡️  Zero-knowledge protocols: No information leaked beyond matches")
-	fmt.Println("  🔒 Hardcoded thresholds: No configurable values that could leak data")
-	fmt.Println("  🚫 No similarity scores: Only intersection pairs revealed")
-	fmt.Println("  ⚡ Constant-time operations: Prevents timing attacks")
+	fmt.Println("  - Zero-knowledge protocols: No information leaked beyond matches")
+	fmt.Println("  - Hardcoded thresholds: No configurable values that could leak data")
+	fmt.Println("  - No similarity scores: Only intersection pairs revealed")
+	fmt.Println("  - Constant-time operations: Prevents timing attacks")
 	fmt.Println()
 	fmt.Println("EXAMPLES:")
 	fmt.Println("  # Basic zero-knowledge intersection")

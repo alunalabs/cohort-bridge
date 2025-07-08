@@ -3,9 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
-
-	"github.com/manifoldco/promptui"
 )
 
 func main() {
@@ -82,46 +79,7 @@ func runInteractiveMode() {
 	}
 }
 
-// Simple text input using basic Go input methods
-func promptForInput(message, defaultValue string) string {
-	if defaultValue != "" {
-		fmt.Printf("%s (default: %s): ", message, defaultValue)
-	} else {
-		fmt.Printf("%s: ", message)
-	}
-
-	var input string
-	fmt.Scanln(&input)
-
-	input = strings.TrimSpace(input)
-	if input == "" && defaultValue != "" {
-		return defaultValue
-	}
-	return input
-}
-
-// Use promptui for menu selection with arrow keys
-func promptForChoice(message string, options []string) int {
-	prompt := promptui.Select{
-		Label: message,
-		Items: options,
-		Size:  10, // Show up to 10 items at once
-		Templates: &promptui.SelectTemplates{
-			Label:    "{{ . }}",
-			Active:   "> {{ . | cyan }}",
-			Inactive: "  {{ . }}",
-			Selected: "Selected: {{ . | green }}",
-		},
-	}
-
-	index, _, err := prompt.Run()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	return index
-}
+// promptForInput and promptForChoice are now defined in utils.go
 
 func showMainHelp() {
 	fmt.Println("CohortBridge - Privacy-Preserving Record Linkage")
