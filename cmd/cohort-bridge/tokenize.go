@@ -4,8 +4,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/csv"
 	"encoding/hex"
+
 	"flag"
 	"fmt"
 	"io"
@@ -379,6 +382,7 @@ func validateTokenizeInputs(inputFile string, useDatabase bool, configFile strin
 	return nil
 }
 
+// performTokenization is now used by both tokenize and pprl commands
 func performTokenization(inputFile, outputFile, inputFormat, outputFormat string, batchSize int, minHashSeed string, useDatabase bool, fields []string, encryptionKey, keyFile string, noEncryption bool, normalizationConfig map[string]crypto.NormalizationMethod) error {
 	if useDatabase {
 		return fmt.Errorf("database mode not yet implemented - please use file mode")
@@ -417,6 +421,7 @@ func performTokenization(inputFile, outputFile, inputFormat, outputFormat string
 	}
 }
 
+// performCSVTokenization is now used by both tokenize and pprl commands
 func performCSVTokenization(allRecords []map[string]string, outputFile string, fields []string, batchSize int, minHashSeed string, encryptionKey, keyFile string, noEncryption bool, normalizationConfig map[string]crypto.NormalizationMethod) error {
 	// Determine if we need to encrypt
 	var tempFile string
@@ -452,7 +457,14 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 		MinHashSize:  100,  // 100-element signature
 		QGramLength:  2,    // 2-grams
 		QGramPadding: "$",  // Padding character
-		NoiseLevel:   0.01, // 1% noise
+		NoiseLevel:   0,    // No noise for deterministic matching
+	}
+
+	// Create deterministic MinHash once and reuse for all records
+	// Use the minHashSeed parameter if provided, otherwise use default seed
+	seed := minHashSeed
+	if seed == "" {
+		seed = "0PsRm4KNmgRSY8ynApUtpXjeO19S7OUE"
 	}
 
 	fmt.Println("Processing records in batches...")
@@ -517,38 +529,21 @@ func performCSVTokenization(allRecords []map[string]string, outputFile string, f
 				return fmt.Errorf("failed to create PPRL record for %s: %w", recordID, err)
 			}
 
-			// Decode the Bloom filter to compute MinHash from it
-			bf, err := pprl.BloomFromBase64(pprlRecord.BloomData)
-			if err != nil {
-				return fmt.Errorf("failed to decode Bloom filter for %s: %w", recordID, err)
-			}
-
-			// Create MinHash and compute signature from the Bloom filter
-			mh, err := pprl.NewMinHash(recordConfig.BloomSize, recordConfig.MinHashSize)
-			if err != nil {
-				return fmt.Errorf("failed to create MinHash for %s: %w", recordID, err)
-			}
-
-			// Compute the signature directly from the Bloom filter
-			_, err = mh.ComputeSignature(bf)
-			if err != nil {
-				return fmt.Errorf("failed to compute MinHash signature for %s: %w", recordID, err)
-			}
-
 			// Convert to CSV format with actual record ID
 			timestamp := time.Now().Format("2006-01-02T15:04:05Z")
 
-			// Encode the complete MinHash object to base64
-			minHashBase64, err := mh.ToBase64()
-			if err != nil {
-				return fmt.Errorf("failed to encode MinHash to base64 for %s: %w", recordID, err)
+			// Convert []uint32 MinHash to []byte
+			minhashBytes := make([]byte, len(pprlRecord.MinHash)*4)
+			for i, val := range pprlRecord.MinHash {
+				binary.BigEndian.PutUint32(minhashBytes[i*4:], val)
 			}
+			minHashEncoded := base64.StdEncoding.EncodeToString(minhashBytes)
 
 			// Write the tokenized record to CSV with the actual record ID
 			row := []string{
 				recordID, // Include the actual record ID
 				pprlRecord.BloomData,
-				minHashBase64,
+				minHashEncoded,
 				timestamp,
 			}
 
@@ -1020,9 +1015,7 @@ func showDecryptHelp() {
 	fmt.Println("  Keys are either saved as .key files or provided manually.")
 }
 
-// parseFieldsWithNormalization parses fields array that may contain normalization specs
-// Input: ["name:FIRST", "LAST", "date:BIRTHDATE", "ZIP"]
-// Output: (["FIRST", "LAST", "BIRTHDATE", "GENDER", "ZIP"], {"FIRST": "name", "BIRTHDATE": "date"})
+// parseFieldsWithNormalization is now used by both tokenize and pprl commands
 func parseFieldsWithNormalization(fields []string) ([]string, map[string]crypto.NormalizationMethod) {
 	var fieldNames []string
 	normalizationConfig := make(map[string]crypto.NormalizationMethod)

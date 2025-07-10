@@ -20,8 +20,8 @@ export default function BasicConfigPage() {
             rate_limit_per_min: 5,
         },
         matching: {
-            hamming_threshold: 90,
-            jaccard_threshold: 0.5,
+            hamming_threshold: 20,
+            jaccard_threshold: 0.32,
         },
     };
 

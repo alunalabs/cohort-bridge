@@ -59,7 +59,7 @@ export default function MatchingSection({ missingFields = [] }: MatchingSectionP
                         <input
                             type="number"
                             {...register('matching.hamming_threshold', { valueAsNumber: true })}
-                            placeholder="90"
+                            placeholder="20"
                             min="1"
                             max="1000"
                             className={getInputClass('matching.hamming_threshold')}
@@ -79,7 +79,7 @@ export default function MatchingSection({ missingFields = [] }: MatchingSectionP
                             min="0"
                             max="1"
                             {...register('matching.jaccard_threshold', { valueAsNumber: true })}
-                            placeholder="0.5"
+                            placeholder="0.32"
                             className={getInputClass('matching.jaccard_threshold')}
                         />
                         <p className="mt-1 text-xs text-slate-600">

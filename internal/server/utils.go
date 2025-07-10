@@ -27,7 +27,7 @@ func GetGlobalMinHash() (*pprl.MinHash, error) {
 	if globalMinHash == nil {
 		// Create with deterministic, agreed-upon parameters for consistency
 		var err error
-		globalMinHash, err = createDeterministicMinHash(128, 42) // 128 signatures, seed 42
+		globalMinHash, err = createDeterministicMinHash(100, 1000) // 100 signatures, 1000 bloom size - matches PPRL workflow
 		if err != nil {
 			return nil, fmt.Errorf("failed to create global MinHash: %v", err)
 		}
@@ -38,7 +38,7 @@ func GetGlobalMinHash() (*pprl.MinHash, error) {
 
 // createDeterministicMinHash creates a MinHash with deterministic parameters
 func createDeterministicMinHash(m, s uint32) (*pprl.MinHash, error) {
-	return pprl.NewMinHash(m, s)
+	return pprl.NewMinHashSeeded(m, s, "cohort-bridge-pprl-seed")
 }
 
 // EnsureOutputDirectory ensures the output directory exists

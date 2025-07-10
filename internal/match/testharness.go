@@ -47,7 +47,7 @@ func NewTestHarness(config *TestConfig) (*TestHarness, error) {
 	}
 
 	// Create a shared MinHash instance for consistent signatures
-	sharedMinHash, err := pprl.NewMinHash(config.BloomFilterSize, config.MinHashSignatures)
+	sharedMinHash, err := pprl.NewMinHashSeeded(config.BloomFilterSize, config.MinHashSignatures, "cohort-bridge-pprl-seed")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create shared MinHash: %w", err)
 	}

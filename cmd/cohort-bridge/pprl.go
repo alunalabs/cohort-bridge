@@ -167,25 +167,35 @@ func runUnifiedWorkflow(cfg *config.Config, force, allowDuplicates bool) {
 		log.Fatalf("Result comparison failed: %v", err)
 	}
 
+	// Generate dynamic output file names based on input file
+	inputFileName := strings.TrimSuffix(filepath.Base(cfg.Database.Filename), filepath.Ext(cfg.Database.Filename))
+	inputFileName = strings.ReplaceAll(inputFileName, "-", "_")
+	inputFileName = strings.ReplaceAll(inputFileName, " ", "_")
+
+	resultsFileName := fmt.Sprintf("intersection_results_%s.json", inputFileName)
+	diffFileName := fmt.Sprintf("intersection_diff_%s.json", inputFileName)
+
 	if resultsMatch {
 		fmt.Println("   SUCCESS: Intersection results match between peers!")
 		fmt.Println("   Both peers computed identical intersections")
 
-		// Copy results to output directory
-		if err := copyToOutput(localIntersectionFile, "intersection_results.json"); err != nil {
+		// Copy results to output directory (use original directory path)
+		outputPath := filepath.Join(originalDir, "out", resultsFileName)
+		if err := copyToAbsolutePath(localIntersectionFile, outputPath); err != nil {
 			fmt.Printf("   Warning: Failed to copy results to output: %v\n", err)
 		} else {
-			fmt.Printf("   Results saved to: out/intersection_results.json\n")
+			fmt.Printf("   Results saved to: out/%s\n", resultsFileName)
 		}
 	} else {
 		fmt.Println("   ERROR: Intersection results DO NOT match between peers!")
 		fmt.Printf("   Diff file created: %s\n", diffFile)
 
-		// Copy diff to output directory
-		if err := copyToOutput(diffFile, "intersection_diff.json"); err != nil {
+		// Copy diff to output directory (use original directory path)
+		diffOutputPath := filepath.Join(originalDir, "out", diffFileName)
+		if err := copyToAbsolutePath(diffFile, diffOutputPath); err != nil {
 			fmt.Printf("   Warning: Failed to copy diff to output: %v\n", err)
 		} else {
-			fmt.Printf("   Diff saved to: out/intersection_diff.json\n")
+			fmt.Printf("   Diff saved to: out/%s\n", diffFileName)
 		}
 
 		log.Fatalf("Workflow failed: Intersection results do not match")
@@ -211,10 +221,28 @@ func performTokenizationStep(cfg *config.Config) (string, error) {
 	fmt.Printf("   Fields: %s\n", strings.Join(cfg.Database.Fields, ", "))
 
 	tokenizedFile := "tokenized_data.csv"
-
-	// Use direct tokenization without external config dependency
 	inputPath := filepath.Join("..", cfg.Database.Filename)
-	if err := performRealTokenization(inputPath, tokenizedFile, cfg.Database.Fields); err != nil {
+
+	// Parse fields with normalization configuration
+	fields, normalizationConfig := parseFieldsWithNormalization(cfg.Database.Fields)
+
+	// Use shared tokenization function from tokenize.go
+	err := performTokenization(
+		inputPath,                          // inputFile
+		tokenizedFile,                      // outputFile
+		"csv",                              // inputFormat
+		"csv",                              // outputFormat
+		1000,                               // batchSize
+		"0PsRm4KNmgRSY8ynApUtpXjeO19S7OUE", // minHashSeed
+		false,                              // useDatabase
+		fields,                             // fields
+		"",                                 // encryptionKey (empty = no encryption)
+		"",                                 // keyFile (empty)
+		true,                               // noEncryption (true for PPRL workflow)
+		normalizationConfig,                // normalizationConfig
+	)
+
+	if err != nil {
 		return "", fmt.Errorf("tokenization failed: %v", err)
 	}
 
@@ -380,10 +408,12 @@ func computeSecureIntersection(localTokens, peerTokens *TokenData, cfg *config.C
 		return nil, fmt.Errorf("failed to convert peer tokens: %v", err)
 	}
 
-	// Configure zero-knowledge fuzzy matcher with duplicate control
+	// Configure zero-knowledge fuzzy matcher with duplicate control and thresholds
 	fuzzyConfig := &match.FuzzyMatchConfig{
-		Party:           party,
-		AllowDuplicates: allowDuplicates,
+		Party:            party,
+		AllowDuplicates:  allowDuplicates,
+		HammingThreshold: cfg.Matching.HammingThreshold,
+		JaccardThreshold: cfg.Matching.JaccardThreshold,
 	}
 
 	// Create zero-knowledge fuzzy matcher
@@ -431,19 +461,10 @@ func tokenDataToPPRLRecords(tokenData *TokenData) ([]*pprl.Record, error) {
 			return nil, fmt.Errorf("failed to decode minhash for %s: %v", tokenRecord.ID, err)
 		}
 
-		// Get MinHash signature
-		signature, err := mh.MarshalBinary()
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal minhash for %s: %v", tokenRecord.ID, err)
-		}
-
-		// Convert to uint32 signature (simplified)
-		var minHashSig []uint32
-		for i := 0; i < len(signature) && i < 400; i += 4 { // Limit to reasonable size
-			if i+3 < len(signature) {
-				val := uint32(signature[i]) | uint32(signature[i+1])<<8 | uint32(signature[i+2])<<16 | uint32(signature[i+3])<<24
-				minHashSig = append(minHashSig, val)
-			}
+		// Get MinHash signature directly - this is the correct way
+		minHashSig := mh.GetSignature()
+		if minHashSig == nil {
+			return nil, fmt.Errorf("failed to get minhash signature for %s", tokenRecord.ID)
 		}
 
 		record := &pprl.Record{
@@ -690,7 +711,7 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 		MinHashSize:  100,  // 100-element signature
 		QGramLength:  2,    // 2-grams
 		QGramPadding: "$",  // Padding character
-		NoiseLevel:   0.01, // 1% noise
+		NoiseLevel:   0,    // No noise for deterministic matching
 	}
 
 	processedCount := 0
@@ -735,8 +756,8 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 			return fmt.Errorf("failed to decode Bloom filter for %s: %w", recordID, err)
 		}
 
-		// Create MinHash and compute signature from the Bloom filter
-		mh, err := pprl.NewMinHash(recordConfig.BloomSize, recordConfig.MinHashSize)
+		// Create deterministic MinHash with shared seed for consistent signatures across parties
+		mh, err := pprl.NewMinHashSeeded(recordConfig.BloomSize, recordConfig.MinHashSize, "0PsRm4KNmgRSY8ynApUtpXjeO19S7OUE")
 		if err != nil {
 			return fmt.Errorf("failed to create MinHash for %s: %w", recordID, err)
 		}
@@ -772,12 +793,6 @@ func performRealTokenization(inputFile, outputFile string, fields []string) erro
 
 	return nil
 }
-
-// copyToOutput function moved to utils.go
-
-// Utility functions
-
-// confirmStep function moved to utils.go
 
 func isDebugMode() bool {
 	if os.Getenv("COHORT_DEBUG") == "1" || os.Getenv("COHORT_DEBUG") == "true" {
@@ -878,11 +893,11 @@ func runPPRLCommand(args []string) {
 	}
 
 	if cfg.Matching.HammingThreshold == 0 {
-		cfg.Matching.HammingThreshold = 90 // Default
+		cfg.Matching.HammingThreshold = 20 // Default
 	}
 
 	if cfg.Matching.JaccardThreshold == 0 {
-		cfg.Matching.JaccardThreshold = 0.5 // Default
+		cfg.Matching.JaccardThreshold = 0.32 // Default
 	}
 
 	// Run the PPRL workflow
@@ -930,6 +945,6 @@ func showPPRLHelp() {
 	fmt.Println("CONFIGURATION REQUIREMENTS:")
 	fmt.Println("  - peer.host and peer.port (peer connection)")
 	fmt.Println("  - listen_port (local server port)")
-	fmt.Println("  - matching.hamming_threshold (default: 90)")
-	fmt.Println("  - matching.jaccard_threshold (default: 0.5)")
+	fmt.Println("  - matching.hamming_threshold (default: 20)")
+	fmt.Println("  - matching.jaccard_threshold (default: 0.32)")
 }

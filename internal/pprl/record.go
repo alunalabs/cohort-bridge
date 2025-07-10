@@ -14,6 +14,7 @@ type RecordConfig struct {
 	QGramLength  int     // Length of q-grams
 	QGramPadding string  // Padding character for q-grams
 	NoiseLevel   float64 // Probability of noise in Bloom filter (0-1)
+	Salt         string  // Salt for MinHash
 }
 
 // CreateRecord creates a new record from a set of fields

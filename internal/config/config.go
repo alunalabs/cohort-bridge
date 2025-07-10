@@ -55,13 +55,12 @@ type Config struct {
 }
 
 // SetDefaults sets reasonable default values for new configuration fields
-func (c *Config) SetDefaults() {
-	// Matching defaults (IMPORTANT: These should match the CLI defaults)
+func (c *Config) SetDefaults() { // Matching defaults (IMPORTANT: These should match the CLI defaults)
 	if c.Matching.HammingThreshold == 0 {
-		c.Matching.HammingThreshold = 90 // Default Hamming threshold
+		c.Matching.HammingThreshold = 20 // Default Hamming threshold
 	}
 	if c.Matching.JaccardThreshold == 0 {
-		c.Matching.JaccardThreshold = 0.5 // Default Jaccard threshold
+		c.Matching.JaccardThreshold = 0.32 // Default Jaccard threshold
 	}
 
 	// Security defaults

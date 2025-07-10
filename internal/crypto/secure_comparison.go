@@ -23,13 +23,15 @@ func min(a, b int) int {
 	return b
 }
 
-// SecurePSIProtocol implements a true zero-knowledge Private Set Intersection protocol
-// that ensures no information leakage about dataset sizes, structure, or non-matches
+// SecurePSIProtocol implements zero-knowledge Private Set Intersection
+// with fuzzy matching support using configurable thresholds
 type SecurePSIProtocol struct {
-	Party      int             // Party identifier (0 or 1)
-	SecretKey  *big.Int        // Cryptographic secret key
-	PublicMod  *big.Int        // Public modulus for computations
-	PrivateSet map[string]bool // Normalized local dataset (hashed for privacy)
+	Party            int             // Party identifier (0 or 1)
+	SecretKey        *big.Int        // Cryptographic secret key
+	PublicMod        *big.Int        // Public modulus for computations
+	PrivateSet       map[string]bool // Normalized local dataset (hashed for privacy)
+	HammingThreshold uint32          // Hamming distance threshold for bloom filter matching
+	JaccardThreshold float64         // Jaccard similarity threshold for MinHash matching
 }
 
 // PrivateMatchPair represents a zero-knowledge match with NO additional metadata
@@ -45,18 +47,24 @@ type PrivateIntersectionResult struct {
 	// NO statistics, counts, metadata, or any other potentially leaking information
 }
 
-// NewSecurePSIProtocol creates a new zero-knowledge PSI protocol instance
+// NewSecurePSIProtocol creates a zero-knowledge PSI protocol with fuzzy matching thresholds
 func NewSecurePSIProtocol(party int) *SecurePSIProtocol {
-	// Generate cryptographically secure parameters
+	return NewSecurePSIProtocolWithThresholds(party, 20, 0.32) // Default thresholds
+}
+
+// NewSecurePSIProtocolWithThresholds creates a PSI protocol with configurable fuzzy matching thresholds
+func NewSecurePSIProtocolWithThresholds(party int, hammingThreshold uint32, jaccardThreshold float64) *SecurePSIProtocol {
+	// Generate cryptographic parameters
 	secretKey, _ := rand.Int(rand.Reader, big.NewInt(1<<31))
-	publicMod := big.NewInt(1)
-	publicMod.Lsh(publicMod, 64) // 2^64
+	publicMod := big.NewInt(2147483647) // Large prime modulus
 
 	return &SecurePSIProtocol{
-		Party:      party,
-		SecretKey:  secretKey,
-		PublicMod:  publicMod,
-		PrivateSet: make(map[string]bool),
+		Party:            party,
+		SecretKey:        secretKey,
+		PublicMod:        publicMod,
+		PrivateSet:       make(map[string]bool),
+		HammingThreshold: hammingThreshold,
+		JaccardThreshold: jaccardThreshold,
 	}
 }
 
@@ -64,13 +72,9 @@ func NewSecurePSIProtocol(party int) *SecurePSIProtocol {
 func (psi *SecurePSIProtocol) ComputeSecureIntersection(localRecords, peerRecords []*pprl.Record) (*PrivateIntersectionResult, error) {
 	fmt.Printf("   🔒 Initializing secure PSI protocol (Party %d)\n", psi.Party)
 
-	// Step 1: Normalize and hash local records (no size revealed)
-	localNormalized := psi.normalizeAndHashRecords(localRecords, "local")
-	peerNormalized := psi.normalizeAndHashRecords(peerRecords, "peer")
-
-	// Step 2: Perform secure intersection using cryptographic protocols
+	// Step 1: Perform secure intersection using cryptographic protocols
 	fmt.Printf("   🔄 Computing secure intersection...\n")
-	matches := psi.performSecurePSI(localNormalized, peerNormalized)
+	matches := psi.performSecurePSI(localRecords, peerRecords)
 
 	fmt.Printf("   ✅ Found %d matches using zero-knowledge protocols\n", len(matches))
 
@@ -244,25 +248,80 @@ func (psi *SecurePSIProtocol) generateFuzzyVariants(fields []string) []string {
 	return variants
 }
 
-// performSecurePSI executes the actual PSI protocol without revealing dataset sizes
-func (psi *SecurePSIProtocol) performSecurePSI(localHashes, peerHashes map[string]string) []PrivateMatchPair {
+// performSecurePSI executes the actual PSI protocol with fuzzy matching using thresholds
+func (psi *SecurePSIProtocol) performSecurePSI(localRecords, peerRecords []*pprl.Record) []PrivateMatchPair {
 	var matches []PrivateMatchPair
 
-	// Secure intersection: only check for matches, no size information leaked
-	for localHash, localID := range localHashes {
-		if peerID, exists := peerHashes[localHash]; exists {
-			// Found a match - record it
-			matches = append(matches, PrivateMatchPair{
-				LocalID: localID,
-				PeerID:  peerID,
-			})
-		}
+	// Perform fuzzy matching between all local and peer records
+	for _, localRecord := range localRecords {
+		for _, peerRecord := range peerRecords {
+			// Decode bloom filters for Hamming distance comparison
+			localBF, err := pprl.BloomFromBase64(localRecord.BloomData)
+			if err != nil {
+				continue // Skip invalid bloom filters
+			}
 
-		// Add constant-time delay to prevent timing attacks
-		psi.constantTimeDelay()
+			peerBF, err := pprl.BloomFromBase64(peerRecord.BloomData)
+			if err != nil {
+				continue // Skip invalid bloom filters
+			}
+
+			// Calculate Hamming distance between bloom filters
+			hammingDistance := psi.calculateHammingDistance(localBF, peerBF)
+
+			// Calculate Jaccard similarity between MinHash signatures
+			jaccardSimilarity := psi.calculateJaccardSimilarity(localRecord.MinHash, peerRecord.MinHash)
+
+			// Debug output for first few comparisons
+			if len(matches) < 5 {
+				fmt.Printf("   DEBUG: %s vs %s: Hamming=%d (threshold=%d), Jaccard=%.3f (threshold=%.3f)\n",
+					localRecord.ID, peerRecord.ID, hammingDistance, psi.HammingThreshold, jaccardSimilarity, psi.JaccardThreshold)
+			}
+
+			// Check if both thresholds are met
+			if hammingDistance <= psi.HammingThreshold && jaccardSimilarity >= psi.JaccardThreshold {
+				matches = append(matches, PrivateMatchPair{
+					LocalID: localRecord.ID,
+					PeerID:  peerRecord.ID,
+				})
+			}
+
+			// Add constant-time delay to prevent timing attacks
+			psi.constantTimeDelay()
+		}
 	}
 
 	return matches
+}
+
+// calculateHammingDistance computes the Hamming distance between two bloom filters
+func (psi *SecurePSIProtocol) calculateHammingDistance(bf1, bf2 *pprl.BloomFilter) uint32 {
+	// Use the built-in HammingDistance method
+	distance, err := bf1.HammingDistance(bf2)
+	if err != nil {
+		return psi.HammingThreshold + 1 // Return failing distance for error
+	}
+	return distance
+}
+
+// calculateJaccardSimilarity computes the Jaccard similarity between two MinHash signatures
+func (psi *SecurePSIProtocol) calculateJaccardSimilarity(minHash1, minHash2 []uint32) float64 {
+	if len(minHash1) != len(minHash2) {
+		return 0.0 // Return failing similarity for length mismatch
+	}
+
+	if len(minHash1) == 0 {
+		return 0.0 // Return failing similarity for empty signatures
+	}
+
+	var matches uint32 = 0
+	for i := 0; i < len(minHash1); i++ {
+		if minHash1[i] == minHash2[i] {
+			matches++
+		}
+	}
+
+	return float64(matches) / float64(len(minHash1))
 }
 
 // cryptoHash creates a deterministic hash for symmetric PSI
@@ -326,6 +385,14 @@ func NewSecureIntersectionProtocol(party int) *SecureIntersectionProtocol {
 func NewSecureIntersectionProtocolWithConfig(party int, allowDuplicates bool) *SecureIntersectionProtocol {
 	return &SecureIntersectionProtocol{
 		PSI:             NewSecurePSIProtocol(party),
+		AllowDuplicates: allowDuplicates,
+	}
+}
+
+// NewSecureIntersectionProtocolWithThresholds creates intersection protocol with fuzzy matching thresholds
+func NewSecureIntersectionProtocolWithThresholds(party int, allowDuplicates bool, hammingThreshold uint32, jaccardThreshold float64) *SecureIntersectionProtocol {
+	return &SecureIntersectionProtocol{
+		PSI:             NewSecurePSIProtocolWithThresholds(party, hammingThreshold, jaccardThreshold),
 		AllowDuplicates: allowDuplicates,
 	}
 }

@@ -292,3 +292,13 @@ func MinHashFromBase64(encoded string) (*MinHash, error) {
 	}
 	return mh, nil
 }
+
+// GetSignature returns a copy of the computed signature
+func (mh *MinHash) GetSignature() []uint32 {
+	if mh.signature == nil {
+		return nil
+	}
+	sig := make([]uint32, len(mh.signature))
+	copy(sig, mh.signature)
+	return sig
+}

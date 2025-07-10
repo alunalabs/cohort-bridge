@@ -12,14 +12,14 @@ import (
 )
 
 // FuzzyMatchConfig defines the configuration for zero-knowledge fuzzy matching
-// All thresholds are hardcoded for maximum security - no configurable values that could leak information
 type FuzzyMatchConfig struct {
-	Party           int  // Which party in the secure protocol (0 or 1) - this is the ONLY configurable value
-	AllowDuplicates bool // Allow 1:many matching (false = 1:1 matching only, default)
+	Party            int     // Which party in the secure protocol (0 or 1)
+	AllowDuplicates  bool    // Allow 1:many matching (false = 1:1 matching only, default)
+	HammingThreshold uint32  // Hamming distance threshold for bloom filter matching
+	JaccardThreshold float64 // Jaccard similarity threshold for MinHash matching
 }
 
 // FuzzyMatcher handles zero-knowledge secure fuzzy matching between records
-// This is the ONLY way the system operates - no toggleable secure/non-secure modes
 type FuzzyMatcher struct {
 	config               *FuzzyMatchConfig
 	intersectionProtocol *crypto.SecureIntersectionProtocol
@@ -29,7 +29,7 @@ type FuzzyMatcher struct {
 func NewFuzzyMatcher(config *FuzzyMatchConfig) *FuzzyMatcher {
 	return &FuzzyMatcher{
 		config:               config,
-		intersectionProtocol: crypto.NewSecureIntersectionProtocolWithConfig(config.Party, config.AllowDuplicates),
+		intersectionProtocol: crypto.NewSecureIntersectionProtocolWithThresholds(config.Party, config.AllowDuplicates, config.HammingThreshold, config.JaccardThreshold),
 	}
 }
 

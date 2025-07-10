@@ -213,6 +213,28 @@ func copyToOutput(srcFile, dstFile string) error {
 	return nil
 }
 
+// copyToAbsolutePath copies a file to an absolute destination path
+func copyToAbsolutePath(srcFile, dstPath string) error {
+	// Ensure destination directory exists
+	dstDir := filepath.Dir(dstPath)
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	// Read source file
+	srcData, err := os.ReadFile(srcFile)
+	if err != nil {
+		return fmt.Errorf("failed to read source file: %w", err)
+	}
+
+	// Write to destination
+	if err := os.WriteFile(dstPath, srcData, 0644); err != nil {
+		return fmt.Errorf("failed to write destination file: %w", err)
+	}
+
+	return nil
+}
+
 // confirmStep prompts user for confirmation unless force mode is enabled
 func confirmStep(message string, force bool) bool {
 	if force {

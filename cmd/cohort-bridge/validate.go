@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/auroradata-ai/cohort-bridge/internal/config"
 	"github.com/auroradata-ai/cohort-bridge/internal/db"
@@ -18,24 +19,33 @@ import (
 
 // ValidationResult holds the results of validation against ground truth
 type ValidationResult struct {
-	TruePositives     int
-	FalsePositives    int
-	FalseNegatives    int
-	Precision         float64
-	Recall            float64
-	F1Score           float64
-	MatchedPairs      []MatchPair
-	MissedMatches     []string
-	FalseMatches      []MatchPair
-	LowestTrueScore   float64
-	HighestFalseScore float64
+	TruePositives  int
+	FalsePositives int
+	FalseNegatives int
+	Precision      float64
+	Recall         float64
+	F1Score        float64
+	MatchedPairs   []MatchPair
+	MissedMatches  []string
+	FalseMatches   []MatchPair
 }
 
-// MatchPair represents a matched pair with its score
+// MatchPair represents a matched pair (no scores in zero-knowledge validation)
 type MatchPair struct {
-	ID1   string
-	ID2   string
-	Score float64
+	ID1 string
+	ID2 string
+}
+
+// TokenRecord represents a single tokenized record (copied from pprl.go)
+type TokenRecordValidation struct {
+	ID          string `json:"id"`
+	BloomFilter string `json:"bloom_filter"` // base64 encoded
+	MinHash     string `json:"minhash"`      // base64 encoded
+}
+
+// TokenData represents the tokenized data to be exchanged (copied from pprl.go)
+type TokenDataValidation struct {
+	Records map[string]TokenRecordValidation `json:"records"`
 }
 
 func runValidateCommand(args []string) {
@@ -43,15 +53,15 @@ func runValidateCommand(args []string) {
 	fmt.Println("============================")
 	fmt.Println("End-to-end validation against ground truth")
 	fmt.Println()
-
 	fs := flag.NewFlagSet("validate", flag.ExitOnError)
+
 	var (
 		config1File      = fs.String("config1", "", "Configuration file for dataset 1 (Party A)")
 		config2File      = fs.String("config2", "", "Configuration file for dataset 2 (Party B)")
 		groundTruthFile  = fs.String("ground-truth", "", "Ground truth file with expected matches")
 		outputFile       = fs.String("output", "", "Output CSV file for validation report")
-		matchThreshold   = fs.Uint("match-threshold", 90, "Hamming distance threshold for matches (default: 90)")
-		jaccardThreshold = fs.Float64("jaccard-threshold", 0.5, "Minimum Jaccard similarity for matches (default: 0.5)")
+		matchThreshold   = fs.Uint("match-threshold", 20, "Hamming distance threshold for matches (default: 20)")
+		jaccardThreshold = fs.Float64("jaccard-threshold", 0.32, "Minimum Jaccard similarity for matches (default: 0.32)")
 		force            = fs.Bool("force", false, "Skip confirmation prompts and run automatically")
 		verbose          = fs.Bool("verbose", false, "Verbose output with detailed analysis")
 		interactive      = fs.Bool("interactive", false, "Force interactive mode")
@@ -108,7 +118,6 @@ func runValidateCommand(args []string) {
 		// Configure match threshold
 		fmt.Println("\nMatching Configuration")
 		fmt.Println("Configuring thresholds...")
-
 		thresholdChoice := promptForChoice("Select Hamming distance threshold:", []string{
 			"20 - Default (recommended for good matches)",
 			"10 - Very strict matching",
@@ -124,18 +133,17 @@ func runValidateCommand(args []string) {
 		case 2:
 			*matchThreshold = 30
 		case 3:
-			customResult := promptForInput("Enter custom Hamming distance threshold (0-100)", "90")
+			customResult := promptForInput("Enter custom Hamming distance threshold (0-100)", "20")
 			if val, err := strconv.ParseUint(customResult, 10, 32); err == nil && val <= 100 {
 				*matchThreshold = uint(val)
 			} else {
-				fmt.Println("Invalid threshold, using default: 90")
-				*matchThreshold = 90
+				fmt.Println("Invalid threshold, using default: 20")
+				*matchThreshold = 20
 			}
 		}
-
 		// Configure Jaccard threshold
 		jaccardChoice := promptForChoice("Select Jaccard similarity threshold:", []string{
-			"0.5 - Default (balanced matching)",
+			"0.32 - Default (balanced matching)",
 			"0.8 - High similarity required",
 			"0.3 - More lenient similarity",
 			"Custom - Enter custom value",
@@ -143,18 +151,18 @@ func runValidateCommand(args []string) {
 
 		switch jaccardChoice {
 		case 0:
-			*jaccardThreshold = 0.5
+			*jaccardThreshold = 0.32
 		case 1:
 			*jaccardThreshold = 0.8
 		case 2:
 			*jaccardThreshold = 0.3
 		case 3:
-			customJaccardResult := promptForInput("Enter custom Jaccard similarity threshold (0.0-1.0)", "0.5")
+			customJaccardResult := promptForInput("Enter custom Jaccard similarity threshold (0.0-1.0)", "0.32")
 			if val, err := strconv.ParseFloat(customJaccardResult, 64); err == nil && val >= 0.0 && val <= 1.0 {
 				*jaccardThreshold = val
 			} else {
-				fmt.Println("Invalid Jaccard threshold, using default: 0.5")
-				*jaccardThreshold = 0.5
+				fmt.Println("Invalid Jaccard threshold, using default: 0.32")
+				*jaccardThreshold = 0.32
 			}
 		}
 
@@ -233,16 +241,6 @@ func runValidateCommand(args []string) {
 	fmt.Printf("Report saved to: %s\n", *outputFile)
 }
 
-// selectConfigFile function moved to utils.go
-
-// selectGroundTruthFile function moved to utils.go
-
-// selectDataFile function moved to utils.go
-
-// getConfigDescription function moved to utils.go
-
-// generateValidationOutputName function replaced with shared generateOutputName in utils.go
-
 func validateValidationInputs(config1, config2, groundTruth string) error {
 	if _, err := os.Stat(config1); os.IsNotExist(err) {
 		return fmt.Errorf("config1 file not found: %s", config1)
@@ -280,6 +278,25 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		return fmt.Errorf("failed to load config2: %w", err)
 	}
 
+	// Use command-line thresholds for validation testing, fall back to config thresholds if not specified
+	configHammingThreshold := uint32(matchThreshold)
+	configJaccardThreshold := jaccardThreshold
+	// If command-line thresholds are default values, use config file thresholds instead
+	if matchThreshold == 20 && jaccardThreshold == 0.32 {
+		configHammingThreshold = cfg1.Matching.HammingThreshold
+		configJaccardThreshold = cfg1.Matching.JaccardThreshold
+
+		// If config2 has different thresholds, use the more permissive one for validation
+		if cfg2.Matching.HammingThreshold > configHammingThreshold {
+			configHammingThreshold = cfg2.Matching.HammingThreshold
+		}
+		if cfg2.Matching.JaccardThreshold < configJaccardThreshold {
+			configJaccardThreshold = cfg2.Matching.JaccardThreshold
+		}
+	}
+
+	fmt.Printf("  Using thresholds: Hamming=%d, Jaccard=%.3f\n", configHammingThreshold, configJaccardThreshold)
+
 	fmt.Println("Loading ground truth data...")
 	fmt.Printf("  Ground truth: %s\n", groundTruth)
 
@@ -307,8 +324,8 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 	fmt.Printf("Dataset 2: %d records\n", len(records2))
 
 	fmt.Println("Running PPRL matching pipeline...")
-	fmt.Printf("  Using Hamming threshold: %d\n", matchThreshold)
-	fmt.Printf("  Using Jaccard threshold: %.3f\n", jaccardThreshold)
+	fmt.Printf("  Using Hamming threshold: %d (from config)\n", configHammingThreshold)
+	fmt.Printf("  Using Jaccard threshold: %.3f (from config)\n", configJaccardThreshold)
 
 	// Configure zero-knowledge matching pipeline
 	// All thresholds are now hardcoded for security - no configurable values
@@ -327,8 +344,8 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 		return fmt.Errorf("failed to create pipeline: %w", err)
 	}
 
-	// Run matching
-	matches, allComparisons, err := runMatchingPipeline(records1, records2, pipeline, uint32(matchThreshold), jaccardThreshold)
+	// Run matching with config thresholds
+	matches, allComparisons, err := runMatchingPipeline(records1, records2, pipeline, configHammingThreshold, configJaccardThreshold)
 	if err != nil {
 		return fmt.Errorf("failed to run matching pipeline: %w", err)
 	}
@@ -356,11 +373,7 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 	fmt.Printf("   Precision: %.3f\n", validationResult.Precision)
 	fmt.Printf("   Recall: %.3f\n", validationResult.Recall)
 	fmt.Printf("   F1-Score: %.3f\n", validationResult.F1Score)
-
 	if verbose {
-		fmt.Printf("   Lowest ground truth score: %.3f\n", validationResult.LowestTrueScore)
-		fmt.Printf("   Highest non-ground truth score: %.3f\n", validationResult.HighestFalseScore)
-
 		// Show some examples
 		if len(validationResult.MatchedPairs) > 0 {
 			fmt.Println("\nSample True Positives:")
@@ -368,7 +381,7 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 				if i >= 3 { // Show first 3
 					break
 				}
-				fmt.Printf("   %s -> %s (score: %.3f)\n", pair.ID1, pair.ID2, pair.Score)
+				fmt.Printf("   %s -> %s\n", pair.ID1, pair.ID2)
 			}
 		}
 
@@ -378,7 +391,7 @@ func performValidation(config1, config2, groundTruth, outputFile string, matchTh
 				if i >= 3 { // Show first 3
 					break
 				}
-				fmt.Printf("   %s -> %s (score: %.3f)\n", pair.ID1, pair.ID2, pair.Score)
+				fmt.Printf("   %s -> %s\n", pair.ID1, pair.ID2)
 			}
 		}
 
@@ -419,8 +432,8 @@ func showValidateHelp() {
 	fmt.Println("  -config2 string       Configuration file for dataset 2 (Party B)")
 	fmt.Println("  -ground-truth string  Ground truth CSV file with expected matches")
 	fmt.Println("  -output string        Output CSV file for validation report")
-	fmt.Println("  -match-threshold      Hamming distance threshold for matches (default: 90)")
-	fmt.Println("  -jaccard-threshold    Jaccard similarity threshold for matches (default: 0.5)")
+	fmt.Println("  -match-threshold      Hamming distance threshold for matches (default: 20)")
+	fmt.Println("  -jaccard-threshold    Jaccard similarity threshold for matches (default: 0.32)")
 	fmt.Println("  -verbose              Verbose output with detailed analysis")
 	fmt.Println("  -interactive          Force interactive mode")
 	fmt.Println("  -force                Skip confirmation prompts and run automatically")
@@ -520,84 +533,84 @@ func loadDataset(cfg *config.Config, datasetName string) ([]*pprl.Record, error)
 		}
 	} else {
 		fmt.Printf("   Loading raw data from %s\n", cfg.Database.Filename)
-		csvDB, err := db.NewCSVDatabase(cfg.Database.Filename)
+
+		// Use the EXACT SAME tokenization process as the PPRL workflow
+		tempTokenFile := fmt.Sprintf("temp_validation_tokens_%s.csv", datasetName)
+		err := performValidationTokenization(cfg.Database.Filename, tempTokenFile, cfg.Database.Fields)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load %s: %w", datasetName, err)
+			return nil, fmt.Errorf("failed to tokenize %s: %w", datasetName, err)
 		}
-		records, err = server.LoadPatientRecordsUtilWithRandomBits(csvDB, cfg.Database.Fields, 0.0) // No random bits for validation
+		defer os.Remove(tempTokenFile) // Clean up temp file
+
+		// Load the tokenized data the same way PPRL workflow does
+		tokenData, err := loadTokenizedDataForValidation(tempTokenFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert %s: %w", datasetName, err)
+			return nil, fmt.Errorf("failed to load tokenized %s: %w", datasetName, err)
+		}
+
+		// Convert to PPRL records using the same method as PPRL workflow
+		records, err = tokenDataToPPRLRecordsForValidation(tokenData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert tokenized %s: %w", datasetName, err)
 		}
 	}
 
 	return records, nil
 }
 
-// REMOVED: runMatchingPipeline
-// For validation purposes, we now use the zero-knowledge fuzzy matcher directly
-// This ensures validation uses the same secure protocols as production
+// runMatchingPipeline performs validation using the SAME approach as the PPRL workflow
+// This ensures validation uses identical zero-knowledge protocols as production
 func runMatchingPipeline(records1, records2 []*pprl.Record, pipeline *match.Pipeline, hammingThreshold uint32, jaccardThreshold float64) ([]*match.PrivateMatchResult, []*match.PrivateMatchResult, error) {
 	fmt.Println("   Computing zero-knowledge matching for validation...")
-	fmt.Println("   Note: Using hardcoded security thresholds (no configurable parameters)")
+	fmt.Printf("   Using thresholds: Hamming=%d, Jaccard=%.3f\n", hammingThreshold, jaccardThreshold)
 
-	// Use the zero-knowledge fuzzy matcher for validation
+	// Use the zero-knowledge fuzzy matcher for validation with proper thresholds
 	fuzzyMatcher := match.NewFuzzyMatcher(&match.FuzzyMatchConfig{
-		Party: 0, // Validation uses party 0
+		Party:            0,     // Validation uses party 0
+		AllowDuplicates:  false, // 1:1 matching for validation
+		HammingThreshold: hammingThreshold,
+		JaccardThreshold: jaccardThreshold,
 	})
 
-	var matches []*match.PrivateMatchResult
-	totalComparisons := 0
-
-	// Perform zero-knowledge comparisons
-	for _, record1 := range records1 {
-		for _, record2 := range records2 {
-			totalComparisons++
-
-			// Use zero-knowledge comparison
-			result, err := fuzzyMatcher.CompareRecords(record1, record2)
-			if err != nil {
-				continue // Skip on error - no information leaked
-			}
-
-			// Only add if it's a match (result will be nil for non-matches)
-			if result != nil {
-				matches = append(matches, result)
-			}
-
-			// Debug first few comparisons (limited information only)
-			if totalComparisons <= 3 {
-				isMatch := result != nil
-				fmt.Printf("   DEBUG: Comparison #%d: %s->%s, IsMatch=%v\n",
-					totalComparisons, record1.ID, record2.ID, isMatch)
-			}
-		}
+	// Perform zero-knowledge intersection computation
+	secureResult, err := fuzzyMatcher.ComputePrivateIntersection(records1, records2)
+	if err != nil {
+		return nil, nil, fmt.Errorf("secure intersection computation failed: %v", err)
 	}
 
-	fmt.Printf("   Completed %d zero-knowledge comparisons, found %d matches\n", totalComparisons, len(matches))
+	// Convert results to PrivateMatchResult
+	var matches []*match.PrivateMatchResult
+	for _, privateMatch := range secureResult.MatchPairs {
+		matchResult := &match.PrivateMatchResult{
+			LocalID: privateMatch.LocalID,
+			PeerID:  privateMatch.PeerID,
+		}
+		matches = append(matches, matchResult)
+	}
 
-	// Debug sample of matches found (IDs only)
+	fmt.Printf("   ✅ Found %d matches using zero-knowledge protocols\n", len(matches))
+	fmt.Printf("   Completed zero-knowledge intersection, found %d matches\n", len(matches))
+
+	// Show sample matches for debugging
 	if len(matches) > 0 {
 		fmt.Printf("   Sample matches found:\n")
 		for i, match := range matches {
-			if i >= 3 { // Show first 3
+			if i >= 3 { // Show first 3 matches only
 				break
 			}
 			fmt.Printf("     %s->%s\n", match.LocalID, match.PeerID)
 		}
 	}
 
-	// Return both matches and all matches (for validation, allComparisons = matches)
 	return matches, matches, nil
 }
 
 // validateResults validates zero-knowledge predicted matches against ground truth
 func validateResults(matches []*match.PrivateMatchResult, allComparisons []*match.PrivateMatchResult, groundTruth map[string]string) *ValidationResult {
 	result := &ValidationResult{
-		MatchedPairs:      make([]MatchPair, 0),
-		MissedMatches:     make([]string, 0),
-		FalseMatches:      make([]MatchPair, 0),
-		LowestTrueScore:   1000.0, // Not used in zero-knowledge validation
-		HighestFalseScore: 0.0,    // Not used in zero-knowledge validation
+		MatchedPairs:  make([]MatchPair, 0),
+		MissedMatches: make([]string, 0),
+		FalseMatches:  make([]MatchPair, 0),
 	}
 
 	// Create a set of predicted matches using ONLY IDs
@@ -610,11 +623,10 @@ func validateResults(matches []*match.PrivateMatchResult, allComparisons []*matc
 	for id1, expectedID2 := range groundTruth {
 		if predictedID2, found := predictedMatches[id1]; found && predictedID2 == expectedID2 {
 			result.TruePositives++
-			// In zero-knowledge validation, we don't have scores - use 1.0 for matches
+			// No scores in zero-knowledge validation - just store the match
 			result.MatchedPairs = append(result.MatchedPairs, MatchPair{
-				ID1:   id1,
-				ID2:   predictedID2,
-				Score: 1.0, // Placeholder score - actual scores not available in zero-knowledge
+				ID1: id1,
+				ID2: predictedID2,
 			})
 		} else {
 			result.FalseNegatives++
@@ -627,9 +639,8 @@ func validateResults(matches []*match.PrivateMatchResult, allComparisons []*matc
 		if expectedID2, exists := groundTruth[match.LocalID]; !exists || expectedID2 != match.PeerID {
 			result.FalsePositives++
 			result.FalseMatches = append(result.FalseMatches, MatchPair{
-				ID1:   match.LocalID,
-				ID2:   match.PeerID,
-				Score: 1.0, // Placeholder score - actual scores not available in zero-knowledge
+				ID1: match.LocalID,
+				ID2: match.PeerID,
 			})
 		}
 	}
@@ -660,7 +671,6 @@ func saveValidationReport(result *ValidationResult, outputFile string, totalGrou
 
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
-
 	// Write summary metrics
 	writer.Write([]string{"metric", "value"})
 	writer.Write([]string{"true_positives", strconv.Itoa(result.TruePositives)})
@@ -671,15 +681,10 @@ func saveValidationReport(result *ValidationResult, outputFile string, totalGrou
 	writer.Write([]string{"recall", fmt.Sprintf("%.6f", result.Recall)})
 	writer.Write([]string{"f1_score", fmt.Sprintf("%.6f", result.F1Score)})
 
-	if verbose {
-		writer.Write([]string{"lowest_true_score", fmt.Sprintf("%.6f", result.LowestTrueScore)})
-		writer.Write([]string{"highest_false_score", fmt.Sprintf("%.6f", result.HighestFalseScore)})
-	}
-
 	// Add detailed results
 	writer.Write([]string{""}) // Empty row
 	writer.Write([]string{"=== DETAILED RESULTS ==="})
-	writer.Write([]string{"match_type", "id1", "id2", "score"})
+	writer.Write([]string{"match_type", "id1", "id2"})
 
 	// True Positives
 	for _, match := range result.MatchedPairs {
@@ -687,7 +692,6 @@ func saveValidationReport(result *ValidationResult, outputFile string, totalGrou
 			"true_positive",
 			match.ID1,
 			match.ID2,
-			fmt.Sprintf("%.6f", match.Score),
 		})
 	}
 
@@ -697,10 +701,8 @@ func saveValidationReport(result *ValidationResult, outputFile string, totalGrou
 			"false_positive",
 			match.ID1,
 			match.ID2,
-			fmt.Sprintf("%.6f", match.Score),
 		})
 	}
-
 	// False Negatives
 	for _, missed := range result.MissedMatches {
 		parts := strings.Split(missed, " -> ")
@@ -709,10 +711,198 @@ func saveValidationReport(result *ValidationResult, outputFile string, totalGrou
 				"false_negative",
 				parts[0],
 				parts[1],
-				"",
 			})
 		}
 	}
 
 	return nil
+}
+
+// performValidationTokenization - exact copy of performRealTokenization from pprl.go
+func performValidationTokenization(inputFile, outputFile string, fields []string) error {
+	// Read input CSV file
+	csvDB, err := db.NewCSVDatabase(inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to open CSV file: %w", err)
+	}
+
+	// Get all records from CSV
+	allRecords, err := csvDB.List(0, 10000) // Load all records
+	if err != nil {
+		return fmt.Errorf("failed to read records: %w", err)
+	}
+
+	// Create CSV output file with proper headers
+	outputCSV, err := os.Create(outputFile)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outputCSV.Close()
+
+	writer := csv.NewWriter(outputCSV)
+	defer writer.Flush()
+
+	// Write CSV header
+	header := []string{"id", "bloom_filter", "minhash", "timestamp"}
+	if err := writer.Write(header); err != nil {
+		return fmt.Errorf("failed to write CSV header: %w", err)
+	}
+
+	// PPRL configuration for tokenization - EXACT SAME as pprl.go
+	recordConfig := &pprl.RecordConfig{
+		BloomSize:    1000, // 1000 bits
+		BloomHashes:  5,    // 5 hash functions
+		MinHashSize:  100,  // 100-element signature
+		QGramLength:  2,    // 2-grams
+		QGramPadding: "$",  // Padding character
+		NoiseLevel:   0,    // No noise for deterministic matching
+	}
+
+	processedCount := 0
+	for _, record := range allRecords {
+		// Extract field values for this record
+		var fieldValues []string
+		for _, field := range fields {
+			// Extract actual field name (remove type prefix like "name:", "date:", etc.)
+			fieldName := field
+			if strings.Contains(field, ":") {
+				parts := strings.Split(field, ":")
+				if len(parts) == 2 {
+					fieldName = parts[1]
+				}
+			}
+
+			if value, exists := record[fieldName]; exists && value != "" {
+				fieldValues = append(fieldValues, value)
+			}
+		}
+
+		if len(fieldValues) == 0 {
+			continue // Skip records with no data in specified fields
+		}
+
+		// Get record ID
+		recordID := record["id"]
+		if recordID == "" {
+			// Generate ID if not present
+			recordID = fmt.Sprintf("record_%d", processedCount+1)
+		}
+
+		// Create PPRL record with real tokenization
+		pprlRecord, err := pprl.CreateRecord(recordID, fieldValues, recordConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create PPRL record for %s: %w", recordID, err)
+		}
+
+		// Decode the Bloom filter to compute MinHash from it
+		bf, err := pprl.BloomFromBase64(pprlRecord.BloomData)
+		if err != nil {
+			return fmt.Errorf("failed to decode Bloom filter for %s: %w", recordID, err)
+		}
+
+		// Create deterministic MinHash with shared seed for consistent signatures across parties
+		mh, err := pprl.NewMinHashSeeded(recordConfig.BloomSize, recordConfig.MinHashSize, "cohort-bridge-pprl-seed")
+		if err != nil {
+			return fmt.Errorf("failed to create MinHash for %s: %w", recordID, err)
+		}
+
+		// Compute the signature directly from the Bloom filter
+		_, err = mh.ComputeSignature(bf)
+		if err != nil {
+			return fmt.Errorf("failed to compute MinHash signature for %s: %w", recordID, err)
+		}
+
+		// Convert to CSV format
+		timestamp := time.Now().Format("2006-01-02T15:04:05Z")
+
+		// Encode the complete MinHash object to base64
+		minHashBase64, err := mh.ToBase64()
+		if err != nil {
+			return fmt.Errorf("failed to encode MinHash to base64 for %s: %w", recordID, err)
+		}
+
+		csvRow := []string{
+			recordID,             // KEEP ORIGINAL ID for validation matching
+			pprlRecord.BloomData, // Already base64 encoded
+			minHashBase64,        // Properly base64 encoded MinHash
+			timestamp,
+		}
+
+		if err := writer.Write(csvRow); err != nil {
+			return fmt.Errorf("failed to write CSV row for %s: %w", recordID, err)
+		}
+
+		processedCount++
+	}
+
+	return nil
+}
+
+// loadTokenizedDataForValidation - exact copy of loadTokenizedData from pprl.go
+func loadTokenizedDataForValidation(filename string) (*TokenDataValidation, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(records) < 2 { // Header + at least one record
+		return nil, fmt.Errorf("insufficient data in tokenized file")
+	}
+
+	tokenData := &TokenDataValidation{Records: make(map[string]TokenRecordValidation)}
+
+	// Skip header row
+	for i := 1; i < len(records); i++ {
+		record := records[i]
+		if len(record) < 4 {
+			continue // Skip incomplete records
+		}
+
+		tokenRecord := TokenRecordValidation{
+			ID:          record[0],
+			BloomFilter: record[1],
+			MinHash:     record[2],
+		}
+
+		tokenData.Records[tokenRecord.ID] = tokenRecord
+	}
+
+	return tokenData, nil
+}
+
+// tokenDataToPPRLRecordsForValidation - exact copy of tokenDataToPPRLRecords from pprl.go
+func tokenDataToPPRLRecordsForValidation(tokenData *TokenDataValidation) ([]*pprl.Record, error) {
+	var records []*pprl.Record
+
+	for _, tokenRecord := range tokenData.Records {
+		// Decode MinHash from base64
+		mh, err := pprl.MinHashFromBase64(tokenRecord.MinHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode minhash for %s: %v", tokenRecord.ID, err)
+		}
+
+		// Get MinHash signature directly - this is the correct way
+		minHashSig := mh.GetSignature()
+		if minHashSig == nil {
+			return nil, fmt.Errorf("failed to get minhash signature for %s", tokenRecord.ID)
+		}
+
+		record := &pprl.Record{
+			ID:        tokenRecord.ID,
+			BloomData: tokenRecord.BloomFilter,
+			MinHash:   minHashSig,
+			QGramData: "", // Not used in workflow
+		}
+
+		records = append(records, record)
+	}
+
+	return records, nil
 }
